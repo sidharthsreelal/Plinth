@@ -185,41 +185,16 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (audioFiles.isNotEmpty && mounted) {
-      debugPrint('Web: Loaded ${audioFiles.length} audio files');
       await context.read<LibraryProvider>().setWebAudioFiles(audioFiles);
     }
   }
 
   Future<void> _pickFolder() async {
     if (kIsWeb) return;
-    
     await _requestPermissions();
-    
     final result = await FilePicker.platform.getDirectoryPath();
-    if (result != null) {
-      debugPrint('Selected folder path: $result');
-      
-      final dir = Directory(result);
-      final exists = dir.existsSync();
-      debugPrint('Directory exists: $exists');
-      
-      if (exists) {
-        try {
-          final entities = dir.listSync(recursive: false);
-          debugPrint('Found ${entities.length} entities in root');
-          for (final entity in entities) {
-            debugPrint('  - ${entity.runtimeType}: ${entity.path}');
-          }
-        } catch (e) {
-          debugPrint('Error listing directory: $e');
-        }
-      }
-      
-      if (mounted) {
-        await context.read<LibraryProvider>().setRootFolder(result);
-      }
-    } else {
-      debugPrint('Folder picker cancelled');
+    if (result != null && mounted) {
+      await context.read<LibraryProvider>().setRootFolder(result);
     }
   }
 

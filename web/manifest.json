@@ -1,11 +1,11 @@
 {
-    "name": "plinth",
-    "short_name": "plinth",
+    "name": "Plinth",
+    "short_name": "Plinth",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0D0D0D",
+    "theme_color": "#0D0D0D",
+    "description": "A local music player that preserves your folder structure.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

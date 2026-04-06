@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
-import 'package:just_audio/just_audio.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 class AudioFile {
   final String path;
@@ -15,8 +14,6 @@ class AudioFile {
   final Duration duration;
   final Uint8List? albumArt;
   final Uint8List? audioBytes;
-
-  AudioSource? _audioSource;
 
   AudioFile({
     required this.path,
@@ -51,12 +48,6 @@ class AudioFile {
     );
   }
 
-  AudioSource getAudioSource() {
-    _audioSource ??= kIsWeb && audioBytes != null
-        ? _BytesAudioSource(audioBytes!, fileName)
-        : AudioSource.uri(Uri.file(path));
-    return _audioSource!;
-  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -109,33 +100,5 @@ class AudioFile {
       debugPrint('AudioFile: Failed to load cached album art: $e');
     }
     return null;
-  }
-}
-
-class _BytesAudioSource extends StreamAudioSource {
-  final Uint8List bytes;
-  final String fileName;
-
-  _BytesAudioSource(this.bytes, this.fileName);
-
-  @override
-  Future<StreamAudioResponse> request([int? start, int? end]) async {
-    start ??= 0;
-    end = end ?? bytes.length;
-    return StreamAudioResponse(
-      sourceLength: bytes.length,
-      contentLength: end - start,
-      offset: start,
-      stream: Stream.value(bytes.sublist(start, end)),
-      contentType: fileName.endsWith('.mp3')
-          ? 'audio/mpeg'
-          : fileName.endsWith('.m4a')
-              ? 'audio/mp4'
-              : fileName.endsWith('.ogg')
-                  ? 'audio/ogg'
-                  : fileName.endsWith('.wav')
-                      ? 'audio/wav'
-                      : 'audio/mpeg',
-    );
   }
 }

@@ -36,16 +36,11 @@ class MetadataService {
 
       if (metadata.pictures != null && metadata.pictures!.isNotEmpty) {
         albumArt = metadata.pictures!.first.bytes;
-        debugPrint('MetadataService: Album art for ${path.basename(file.path)}: ${albumArt!.length} bytes, mime: ${metadata.pictures!.first.mimetype}');
-      } else {
-        debugPrint('MetadataService: No album art found for ${path.basename(file.path)}');
       }
 
       if (metadata.duration != null) {
         duration = metadata.duration!;
       }
-
-      debugPrint('MetadataService: OK - ${path.basename(file.path)} | $title | $artist | ${duration.inSeconds}s');
     } catch (e) {
       debugPrint('MetadataService: metadata extraction failed for ${path.basename(file.path)}: $e');
     }
@@ -57,7 +52,6 @@ class MetadataService {
         final dur = player.duration;
         if (dur != null) {
           duration = dur;
-          debugPrint('MetadataService: Duration from just_audio: ${duration.inSeconds}s');
         }
         await player.dispose();
       } catch (e) {

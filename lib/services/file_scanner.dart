@@ -11,11 +11,8 @@ class FileScanner {
   ];
 
   Future<FolderNode> scanFolder(String rootPath) async {
-    debugPrint('FileScanner: Scanning folder: $rootPath');
     final dir = Directory(rootPath);
-    
     if (!dir.existsSync()) {
-      debugPrint('FileScanner: Directory does not exist: $rootPath');
       return FolderNode(
         name: path.basename(rootPath),
         path: rootPath,
@@ -23,7 +20,6 @@ class FileScanner {
         audioFiles: [],
       );
     }
-    
     return await _buildNode(dir);
   }
 
@@ -35,7 +31,6 @@ class FileScanner {
     try {
       entities = dir.listSync(recursive: false)
         ..sort((a, b) => a.path.compareTo(b.path));
-      debugPrint('FileScanner: Found ${entities.length} entities in ${dir.path}');
     } catch (e) {
       debugPrint('FileScanner: Error listing ${dir.path}: $e');
       return FolderNode(
@@ -56,9 +51,7 @@ class FileScanner {
         }
       } else if (entity is File) {
         final ext = path.extension(entity.path).toLowerCase();
-        debugPrint('FileScanner: Checking file ${entity.path}, ext: $ext');
         if (_audioExtensions.contains(ext)) {
-          debugPrint('FileScanner: Audio file found: ${entity.path}');
           try {
             final audioFile = await MetadataService.extract(entity);
             await audioFile.cacheAlbumArt();
@@ -69,8 +62,6 @@ class FileScanner {
         }
       }
     }
-
-    debugPrint('FileScanner: Built node ${dir.path} with ${subFolders.length} folders, ${audioFiles.length} audio files');
 
     return FolderNode(
       name: path.basename(dir.path),

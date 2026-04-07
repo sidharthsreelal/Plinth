@@ -5,31 +5,35 @@ import 'package:plinth/providers/player_provider.dart';
 import 'package:plinth/providers/theme_provider.dart';
 import 'package:plinth/screens/now_playing_screen.dart';
 
-class MiniPlayer extends StatelessWidget {
+class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key});
 
-  static void _openNowPlaying(BuildContext context) {
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 1),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOutCubic,
-              )),
-              child: const NowPlayingScreen(),
-            ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 350),
-      ),
-    );
+  @override
+  State<MiniPlayer> createState() => _MiniPlayerState();
+}
+
+class _MiniPlayerState extends State<MiniPlayer> {
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
+  bool _isDragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final player = context.read<PlayerProvider>();
+      player.positionStream.listen((pos) {
+        if (pos != null && !_isDragging) {
+          setState(() => _position = pos);
+        }
+      });
+      player.durationStream.listen((dur) {
+        if (dur != null) {
+          setState(() => _duration = dur);
+        }
+      });
+    });
   }
 
   @override
@@ -78,65 +82,112 @@ class MiniPlayer extends StatelessWidget {
                       ),
                     ),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: track.albumArt != null
-                              ? Image.memory(
-                                  track.albumArt!,
-                                  width: 40,
-                                  height: 40,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return _fallbackAlbumArt();
-                                  },
-                                )
-                              : _fallbackAlbumArt(),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
                             children: [
-                              Text(
-                                track.title,
-                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      fontSize: 14,
-                                    ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: track.albumArt != null
+                                    ? Image.memory(
+                                        track.albumArt!,
+                                        width: 40,
+                                        height: 40,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return _fallbackAlbumArt();
+                                        },
+                                      )
+                                    : _fallbackAlbumArt(),
                               ),
-                              Text(
-                                track.artist,
-                                style: Theme.of(context).textTheme.bodySmall,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      track.title,
+                                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                            fontSize: 14,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text(
+                                      track.artist,
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  player.isPlaying
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                  color: accent,
+                                ),
+                                onPressed: () => player.togglePlayPause(),
+                              ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.skip_next_rounded,
+                                  color: const Color(0xFFFFFFFF),
+                                ),
+                                onPressed: () => player.skipNext(),
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          icon: Icon(
-                            player.isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: accent,
+                      ),
+                      SizedBox(
+                        height: 3,
+                        child: GestureDetector(
+                          onHorizontalDragStart: (details) {
+                            setState(() => _isDragging = true);
+                          },
+                          onHorizontalDragUpdate: (details) {
+                            final box = context.findRenderObject() as RenderBox?;
+                            if (box != null && _duration.inMilliseconds > 0) {
+                              final dx = details.localPosition.dx;
+                              final width = box.size.width;
+                              final fraction = (dx / width).clamp(0.0, 1.0);
+                              setState(() {
+                                _position = Duration(
+                                  milliseconds: (fraction * _duration.inMilliseconds).toInt(),
+                                );
+                              });
+                            }
+                          },
+                          onHorizontalDragEnd: (details) {
+                            setState(() => _isDragging = false);
+                            final box = context.findRenderObject() as RenderBox?;
+                            if (box != null && _duration.inMilliseconds > 0) {
+                              final dx = details.localPosition.dx;
+                              final width = box.size.width;
+                              final fraction = (dx / width).clamp(0.0, 1.0);
+                              player.seekTo(Duration(
+                                milliseconds: (fraction * _duration.inMilliseconds).toInt(),
+                              ));
+                            }
+                          },
+                          child: LinearProgressIndicator(
+                            value: _duration.inMilliseconds > 0
+                                ? _position.inMilliseconds / _duration.inMilliseconds
+                                : 0,
+                            backgroundColor: Colors.transparent,
+                            valueColor: AlwaysStoppedAnimation<Color>(accent.withOpacity(0.6)),
+                            minHeight: 3,
                           ),
-                          onPressed: () => player.togglePlayPause(),
                         ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.skip_next_rounded,
-                            color: const Color(0xFFFFFFFF),
-                          ),
-                          onPressed: () => player.skipNext(),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -144,6 +195,30 @@ class MiniPlayer extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  static void _openNowPlaying(BuildContext context) {
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).animate(CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              )),
+              child: const NowPlayingScreen(),
+            ),
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 350),
+      ),
     );
   }
 

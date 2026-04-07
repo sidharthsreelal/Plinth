@@ -23,6 +23,11 @@ class VinylRecord extends StatefulWidget {
 
 class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStateMixin {
   late AnimationController _rotationController;
+  double _dragAngle = 0;
+  bool _isDragging = false;
+  double _lastAngle = 0;
+  Duration _dragStartPosition = Duration.zero;
+  double _dragVelocity = 0;
 
   @override
   void initState() {
@@ -39,7 +44,7 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
   @override
   void didUpdateWidget(VinylRecord oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.isSpinning != oldWidget.isSpinning) {
+    if (widget.isSpinning != oldWidget.isSpinning && !_isDragging) {
       if (widget.isSpinning) {
         _rotationController.repeat();
       } else {
@@ -52,6 +57,62 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
   void dispose() {
     _rotationController.dispose();
     super.dispose();
+  }
+
+  double _getAngle(Offset center, Offset point) {
+    return math.atan2(point.dy - center.dy, point.dx - center.dx);
+  }
+
+  void _onVinylDragStart(DragStartDetails details) {
+    _isDragging = true;
+    _dragVelocity = 0;
+    final center = Offset(widget.size / 2, widget.size / 2);
+    _lastAngle = _getAngle(center, details.localPosition);
+    _dragStartPosition = context.read<PlayerProvider>().player.position ?? Duration.zero;
+    _rotationController.stop();
+  }
+
+  void _onVinylDragUpdate(DragUpdateDetails details) {
+    if (!_isDragging) return;
+    final center = Offset(widget.size / 2, widget.size / 2);
+    final currentAngle = _getAngle(center, details.localPosition);
+    double delta = currentAngle - _lastAngle;
+
+    if (delta > math.pi) delta -= 2 * math.pi;
+    if (delta < -math.pi) delta += 2 * math.pi;
+
+    _dragVelocity = delta;
+    _dragAngle += delta;
+    _lastAngle = currentAngle;
+
+    final player = context.read<PlayerProvider>();
+    final duration = player.player.duration;
+    if (duration != null && duration.inMilliseconds > 0) {
+      final seekAmount = _dragAngle * duration.inMilliseconds * 0.25;
+      int newPosition = _dragStartPosition.inMilliseconds + seekAmount.toInt();
+
+      if (newPosition < 0) newPosition = 0;
+      if (newPosition > duration.inMilliseconds - 2000) newPosition = duration.inMilliseconds - 2000;
+
+      final clampedPosition = Duration(milliseconds: newPosition);
+      final currentPosition = player.player.position ?? Duration.zero;
+      if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
+        player.seekTo(clampedPosition);
+      }
+    }
+
+    setState(() {});
+  }
+
+  void _onVinylDragEnd(DragEndDetails details) {
+    _isDragging = false;
+    _dragAngle = 0;
+    _dragVelocity = 0;
+    final player = context.read<PlayerProvider>();
+    if (player.isPlaying) {
+      _rotationController.repeat();
+    }
+    setState(() {});
   }
 
   @override
@@ -82,39 +143,51 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
                 ],
               ),
             ),
-            RotationTransition(
-              turns: _rotationController,
-              child: SizedBox(
-                width: widget.size,
-                height: widget.size,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CustomPaint(
-                      size: Size(widget.size, widget.size),
-                      painter: _VinylPainter(
-                        isPlaying: isPlaying,
-                        accent: accent,
-                        fftData: fftData,
+            Transform.rotate(
+              angle: _isDragging ? _dragAngle : 0,
+              child: RotationTransition(
+                turns: _rotationController,
+                child: SizedBox(
+                  width: widget.size,
+                  height: widget.size,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      GestureDetector(
+                        onPanStart: _onVinylDragStart,
+                        onPanUpdate: _onVinylDragUpdate,
+                        onPanEnd: _onVinylDragEnd,
+                        child: CustomPaint(
+                          size: Size(widget.size, widget.size),
+                          painter: _VinylPainter(
+                            isPlaying: isPlaying,
+                            accent: accent,
+                            fftData: fftData,
+                            isDragging: _isDragging,
+                          ),
+                        ),
                       ),
-                    ),
-                    ClipOval(
-                      child: Container(
-                        width: labelRadius,
-                        height: labelRadius,
-                        child: widget.albumArt != null && widget.albumArt!.isNotEmpty
-                            ? Image.memory(
-                                widget.albumArt!,
-                                fit: BoxFit.cover,
-                                gaplessPlayback: true,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return _fallbackLabel(labelRadius, accent);
-                                },
-                              )
-                            : _fallbackLabel(labelRadius, accent),
+                      ClipOval(
+                        child: GestureDetector(
+                          onTap: () => playerProvider.togglePlayPause(),
+                          child: Container(
+                            width: labelRadius,
+                            height: labelRadius,
+                            child: widget.albumArt != null && widget.albumArt!.isNotEmpty
+                                ? Image.memory(
+                                    widget.albumArt!,
+                                    fit: BoxFit.cover,
+                                    gaplessPlayback: true,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return _fallbackLabel(labelRadius, accent);
+                                    },
+                                  )
+                                : _fallbackLabel(labelRadius, accent),
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -144,11 +217,13 @@ class _VinylPainter extends CustomPainter {
   final bool isPlaying;
   final Color accent;
   final List<double> fftData;
+  final bool isDragging;
 
   _VinylPainter({
     required this.isPlaying,
     required this.accent,
     required this.fftData,
+    required this.isDragging,
   });
 
   @override
@@ -178,7 +253,7 @@ class _VinylPainter extends CustomPainter {
       canvas.drawCircle(center, grooveRadius, groovePaint);
     }
 
-    if (isPlaying && fftData.isNotEmpty) {
+    if (isPlaying && fftData.isNotEmpty && !isDragging) {
       _drawCircularVisualizer(canvas, center, radius);
     }
   }
@@ -212,6 +287,7 @@ class _VinylPainter extends CustomPainter {
   bool shouldRepaint(covariant _VinylPainter oldDelegate) {
     return oldDelegate.isPlaying != isPlaying ||
         oldDelegate.accent != accent ||
-        oldDelegate.fftData != fftData;
+        oldDelegate.fftData != fftData ||
+        oldDelegate.isDragging != isDragging;
   }
 }

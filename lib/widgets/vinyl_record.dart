@@ -94,6 +94,8 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
         _dragVelocity = delta;
       } else if (newPosition > limitMs) {
         newPosition = limitMs;
+        _dragAngle += delta;
+        _dragVelocity = delta;
       } else {
         _dragAngle += delta;
         _dragVelocity = delta;
@@ -104,6 +106,10 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
       if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
         player.seekTo(clampedPosition);
       }
+
+      if (newPosition >= limitMs && player.isPlaying) {
+        player.skipNext();
+      }
     } else {
       _dragVelocity = delta;
       _dragAngle += delta;
@@ -111,6 +117,56 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
 
     _lastAngle = currentAngle;
     setState(() {});
+  }
+
+  void _onVinylDragUpdateAsVertical(DragUpdateDetails details) {
+    if (!_isDragging) return;
+    final center = Offset(widget.size / 2, widget.size / 2);
+    final currentAngle = _getAngle(center, details.localPosition);
+    double delta = currentAngle - _lastAngle;
+    if (delta > math.pi) delta -= 2 * math.pi;
+    if (delta < -math.pi) delta += 2 * math.pi;
+
+    final player = context.read<PlayerProvider>();
+    final duration = player.player.duration;
+    if (duration != null && duration.inMilliseconds > 0) {
+      final seekAmount = (_dragAngle / (2 * math.pi)) * duration.inMilliseconds * 0.5;
+      int newPosition = _dragStartPosition.inMilliseconds + seekAmount.toInt();
+
+      final limitMs = duration.inMilliseconds - 1000;
+      if (newPosition < 0) {
+        newPosition = 0;
+        _dragAngle += delta;
+        _dragVelocity = delta;
+      } else if (newPosition > limitMs) {
+        newPosition = limitMs;
+        _dragAngle += delta;
+        _dragVelocity = delta;
+      } else {
+        _dragAngle += delta;
+        _dragVelocity = delta;
+      }
+
+      final clampedPosition = Duration(milliseconds: newPosition);
+      final currentPosition = player.player.position ?? Duration.zero;
+      if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
+        player.seekTo(clampedPosition);
+      }
+
+      if (newPosition >= limitMs && player.isPlaying) {
+        player.skipNext();
+      }
+    } else {
+      _dragVelocity = delta;
+      _dragAngle += delta;
+    }
+
+    _lastAngle = currentAngle;
+    setState(() {});
+  }
+
+  void _onVinylDragUpdateAsHorizontal(DragUpdateDetails details) {
+    _onVinylDragUpdate(details);
   }
 
   void _onVinylDragEnd(DragEndDetails details) {
@@ -168,9 +224,16 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
                     alignment: Alignment.center,
                     children: [
                       GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onPanStart: _onVinylDragStart,
                         onPanUpdate: _onVinylDragUpdate,
                         onPanEnd: _onVinylDragEnd,
+                        onVerticalDragStart: _onVinylDragStart,
+                        onVerticalDragUpdate: _onVinylDragUpdateAsVertical,
+                        onVerticalDragEnd: _onVinylDragEnd,
+                        onHorizontalDragStart: _onVinylDragStart,
+                        onHorizontalDragUpdate: _onVinylDragUpdateAsHorizontal,
+                        onHorizontalDragEnd: _onVinylDragEnd,
                         child: CustomPaint(
                           size: Size(widget.size, widget.size),
                           painter: _VinylPainter(

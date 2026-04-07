@@ -76,6 +76,7 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> playTrack(AudioFile track, List<AudioFile> queue) async {
+    _isScrubbing = false;
     _queue = List.from(queue);
     _originalQueue = List.from(queue);
     _currentIndex = queue.indexOf(track);
@@ -154,6 +155,8 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> skipNext() async {
     if (_queue.isEmpty) return;
+
+    _isScrubbing = false;
 
     if (_loopMode == LoopMode.one) {
       await _player.seek(Duration.zero);

@@ -81,26 +81,35 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
     if (delta > math.pi) delta -= 2 * math.pi;
     if (delta < -math.pi) delta += 2 * math.pi;
 
-    _dragVelocity = delta;
-    _dragAngle += delta;
-    _lastAngle = currentAngle;
-
     final player = context.read<PlayerProvider>();
     final duration = player.player.duration;
     if (duration != null && duration.inMilliseconds > 0) {
-      final seekAmount = _dragAngle * duration.inMilliseconds * 0.25;
+      final seekAmount = (_dragAngle / (2 * math.pi)) * duration.inMilliseconds * 0.5;
       int newPosition = _dragStartPosition.inMilliseconds + seekAmount.toInt();
 
-      if (newPosition < 0) newPosition = 0;
-      if (newPosition > duration.inMilliseconds - 2000) newPosition = duration.inMilliseconds - 2000;
+      final limitMs = duration.inMilliseconds - 1000;
+      if (newPosition < 0) {
+        newPosition = 0;
+        _dragAngle += delta;
+        _dragVelocity = delta;
+      } else if (newPosition > limitMs) {
+        newPosition = limitMs;
+      } else {
+        _dragAngle += delta;
+        _dragVelocity = delta;
+      }
 
       final clampedPosition = Duration(milliseconds: newPosition);
       final currentPosition = player.player.position ?? Duration.zero;
       if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
         player.seekTo(clampedPosition);
       }
+    } else {
+      _dragVelocity = delta;
+      _dragAngle += delta;
     }
 
+    _lastAngle = currentAngle;
     setState(() {});
   }
 
@@ -109,8 +118,13 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
     _dragAngle = 0;
     _dragVelocity = 0;
     final player = context.read<PlayerProvider>();
-    if (player.isPlaying) {
-      _rotationController.repeat();
+    final duration = player.player.duration;
+    final position = player.player.position;
+    if (duration != null && position != null) {
+      final limitMs = duration.inMilliseconds - 1000;
+      if (position.inMilliseconds < limitMs && player.isPlaying) {
+        _rotationController.repeat();
+      }
     }
     setState(() {});
   }

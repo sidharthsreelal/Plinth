@@ -83,10 +83,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                             ),
                           ),
                           const Spacer(),
-                          VinylRecord(
-                            albumArt: track.albumArt,
-                            isSpinning: player.isPlaying,
-                            size: 280,
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onVerticalDragStart: (_) {},
+                            onVerticalDragUpdate: (_) {},
+                            onVerticalDragEnd: (_) {},
+                            child: VinylRecord(
+                              albumArt: track.albumArt,
+                              isSpinning: player.isPlaying,
+                              size: 280,
+                            ),
                           ),
                           const SizedBox(height: 32),
                           Padding(

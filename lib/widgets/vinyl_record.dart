@@ -94,8 +94,6 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
         _dragVelocity = delta;
       } else if (newPosition > limitMs) {
         newPosition = limitMs;
-        _dragAngle += delta;
-        _dragVelocity = delta;
       } else {
         _dragAngle += delta;
         _dragVelocity = delta;
@@ -105,10 +103,6 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
       final currentPosition = player.player.position ?? Duration.zero;
       if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
         player.seekTo(clampedPosition);
-      }
-
-      if (newPosition >= limitMs && player.isPlaying) {
-        player.skipNext();
       }
     } else {
       _dragVelocity = delta;
@@ -140,8 +134,6 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
         _dragVelocity = delta;
       } else if (newPosition > limitMs) {
         newPosition = limitMs;
-        _dragAngle += delta;
-        _dragVelocity = delta;
       } else {
         _dragAngle += delta;
         _dragVelocity = delta;
@@ -151,10 +143,6 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
       final currentPosition = player.player.position ?? Duration.zero;
       if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
         player.seekTo(clampedPosition);
-      }
-
-      if (newPosition >= limitMs && player.isPlaying) {
-        player.skipNext();
       }
     } else {
       _dragVelocity = delta;

@@ -14,8 +14,6 @@ class PlayerProvider extends ChangeNotifier {
   bool _shuffle = false;
   LoopMode _loopMode = LoopMode.off;
   List<double> _fftData = List.filled(64, 0);
-  bool _isScrubbing = false;
-  DateTime? _lastScrubTime;
   DateTime? _lastCompleteEvent;
 
   AudioPlayer get player => _player;
@@ -24,7 +22,7 @@ class PlayerProvider extends ChangeNotifier {
   bool get isPlaying => _isPlaying;
   bool get shuffle => _shuffle;
   LoopMode get loopMode => _loopMode;
-  bool get isScrubbing => _isScrubbing;
+  DateTime? get lastCompleteEvent => _lastCompleteEvent;
   List<double> get fftData => _fftData;
 
   AudioFile? get currentTrack => _queue.isNotEmpty ? _queue[_currentIndex] : null;
@@ -37,8 +35,7 @@ class PlayerProvider extends ChangeNotifier {
       if (state.processingState == ProcessingState.completed) {
         _onTrackComplete();
       } else if (state.processingState == ProcessingState.idle) {
-        _isPlaying = false;
-        _fftData = List.filled(64, 0);
+        // Don't set _isPlaying = false during track transitions
       } else {
         _isPlaying = state.playing;
         if (!state.playing) {
@@ -76,7 +73,6 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> playTrack(AudioFile track, List<AudioFile> queue) async {
-    _isScrubbing = false;
     _queue = List.from(queue);
     _originalQueue = List.from(queue);
     _currentIndex = queue.indexOf(track);
@@ -156,8 +152,6 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> skipNext() async {
     if (_queue.isEmpty) return;
 
-    _isScrubbing = false;
-
     if (_loopMode == LoopMode.one) {
       await _player.seek(Duration.zero);
       await _player.play();
@@ -226,12 +220,7 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> seekTo(Duration position) async {
-    _isScrubbing = true;
-    _lastScrubTime = DateTime.now();
     await _player.seek(position);
-    Future.delayed(const Duration(milliseconds: 1000), () {
-      _isScrubbing = false;
-    });
   }
 
   void toggleShuffle() {
@@ -267,7 +256,6 @@ class PlayerProvider extends ChangeNotifier {
 
   void _onTrackComplete() {
     final now = DateTime.now();
-    if (_isScrubbing) return;
     if (_lastCompleteEvent != null && now.difference(_lastCompleteEvent!) < const Duration(seconds: 2)) {
       return;
     }
@@ -276,8 +264,13 @@ class PlayerProvider extends ChangeNotifier {
     if (_loopMode == LoopMode.one) {
       _player.seek(Duration.zero);
       _player.play();
+      _isPlaying = true;
+      notifyListeners();
     } else if (_loopMode == LoopMode.all || _currentIndex < _queue.length - 1) {
-      skipNext();
+      skipNext().then((_) {
+        _isPlaying = true;
+        notifyListeners();
+      });
     } else {
       _isPlaying = false;
       _fftData = List.filled(64, 0);

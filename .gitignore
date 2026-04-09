@@ -40,3 +40,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 plinth_system_prompt.md
+PROJECT.md

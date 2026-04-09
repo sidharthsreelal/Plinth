@@ -21,11 +21,6 @@ public final class GeneratedPluginRegistrant {
       Log.e(TAG, "Error registering plugin audio_session, com.ryanheise.audio_session.AudioSessionPlugin", e);
     }
     try {
-      flutterEngine.getPlugins().add(new com.iammop.audio_visualizer.AudioVisualizerPlugin());
-    } catch (Exception e) {
-      Log.e(TAG, "Error registering plugin audio_visualizer, com.iammop.audio_visualizer.AudioVisualizerPlugin", e);
-    }
-    try {
       flutterEngine.getPlugins().add(new com.mr.flutter.plugin.filepicker.FilePickerPlugin());
     } catch (Exception e) {
       Log.e(TAG, "Error registering plugin file_picker, com.mr.flutter.plugin.filepicker.FilePickerPlugin", e);

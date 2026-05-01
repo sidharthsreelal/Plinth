@@ -21,13 +21,20 @@ class VinylRecord extends StatefulWidget {
   State<VinylRecord> createState() => _VinylRecordState();
 }
 
-class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStateMixin {
+class _VinylRecordState extends State<VinylRecord>
+    with SingleTickerProviderStateMixin {
   late AnimationController _rotationController;
-  double _dragAngle = 0;
+
+  // The accumulated angle offset from all drags so far.
+  double _baseAngle = 0;
+  // The additional angle being added by the current ongoing drag.
+  double _draggingDelta = 0;
   bool _isDragging = false;
-  double _lastAngle = 0;
+  double _lastDragAngle = 0;
+
+  // Seek tracking during drag.
   Duration _dragStartPosition = Duration.zero;
-  double _dragVelocity = 0;
+  double _dragStartAngle = 0; // value of _baseAngle when drag started
 
   @override
   void initState() {
@@ -65,110 +72,64 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
 
   void _onVinylDragStart(DragStartDetails details) {
     _isDragging = true;
-    _dragVelocity = 0;
     final center = Offset(widget.size / 2, widget.size / 2);
-    _lastAngle = _getAngle(center, details.localPosition);
-    _dragStartPosition = context.read<PlayerProvider>().player.position ?? Duration.zero;
+    _lastDragAngle = _getAngle(center, details.localPosition);
+    _dragStartAngle = _baseAngle;
+    _draggingDelta = 0;
+    _dragStartPosition =
+        context.read<PlayerProvider>().player.position ?? Duration.zero;
+
+    // Freeze at the current visual angle. We compute how far through one
+    // full rotation the controller is and bake that into _baseAngle so the
+    // record doesn't jump.
+    final controllerFraction = _rotationController.value; // 0..1
+    _baseAngle += controllerFraction * 2 * math.pi;
     _rotationController.stop();
+    // Reset controller to 0 so it can resume cleanly from 0 later.
+    _rotationController.value = 0;
+    setState(() {});
   }
 
   void _onVinylDragUpdate(DragUpdateDetails details) {
     if (!_isDragging) return;
     final center = Offset(widget.size / 2, widget.size / 2);
     final currentAngle = _getAngle(center, details.localPosition);
-    double delta = currentAngle - _lastAngle;
-
+    double delta = currentAngle - _lastDragAngle;
     if (delta > math.pi) delta -= 2 * math.pi;
     if (delta < -math.pi) delta += 2 * math.pi;
 
+    _draggingDelta += delta;
+    _lastDragAngle = currentAngle;
+
+    // Compute seek position from drag angle relative to drag start.
     final player = context.read<PlayerProvider>();
     final duration = player.player.duration;
     if (duration != null && duration.inMilliseconds > 0) {
-      final seekAmount = (_dragAngle / (2 * math.pi)) * duration.inMilliseconds * 0.5;
-      int newPosition = _dragStartPosition.inMilliseconds + seekAmount.toInt();
-
-      final limitMs = duration.inMilliseconds - 1000;
-      if (newPosition < 0) {
-        newPosition = 0;
-        _dragAngle += delta;
-        _dragVelocity = delta;
-      } else if (newPosition > limitMs) {
-        newPosition = limitMs;
-      } else {
-        _dragAngle += delta;
-        _dragVelocity = delta;
-      }
-
-      final clampedPosition = Duration(milliseconds: newPosition);
-      final currentPosition = player.player.position ?? Duration.zero;
-      if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
-        player.seekTo(clampedPosition);
-      }
-    } else {
-      _dragVelocity = delta;
-      _dragAngle += delta;
+      final totalAngle = _draggingDelta;
+      final seekAmount =
+          (totalAngle / (2 * math.pi)) * duration.inMilliseconds * 0.5;
+      int newMs = _dragStartPosition.inMilliseconds + seekAmount.toInt();
+      newMs = newMs.clamp(0, duration.inMilliseconds - 1000);
+      player.seekTo(Duration(milliseconds: newMs));
     }
 
-    _lastAngle = currentAngle;
     setState(() {});
-  }
-
-  void _onVinylDragUpdateAsVertical(DragUpdateDetails details) {
-    if (!_isDragging) return;
-    final center = Offset(widget.size / 2, widget.size / 2);
-    final currentAngle = _getAngle(center, details.localPosition);
-    double delta = currentAngle - _lastAngle;
-    if (delta > math.pi) delta -= 2 * math.pi;
-    if (delta < -math.pi) delta += 2 * math.pi;
-
-    final player = context.read<PlayerProvider>();
-    final duration = player.player.duration;
-    if (duration != null && duration.inMilliseconds > 0) {
-      final seekAmount = (_dragAngle / (2 * math.pi)) * duration.inMilliseconds * 0.5;
-      int newPosition = _dragStartPosition.inMilliseconds + seekAmount.toInt();
-
-      final limitMs = duration.inMilliseconds - 1000;
-      if (newPosition < 0) {
-        newPosition = 0;
-        _dragAngle += delta;
-        _dragVelocity = delta;
-      } else if (newPosition > limitMs) {
-        newPosition = limitMs;
-      } else {
-        _dragAngle += delta;
-        _dragVelocity = delta;
-      }
-
-      final clampedPosition = Duration(milliseconds: newPosition);
-      final currentPosition = player.player.position ?? Duration.zero;
-      if ((clampedPosition - currentPosition).abs() > const Duration(milliseconds: 200)) {
-        player.seekTo(clampedPosition);
-      }
-    } else {
-      _dragVelocity = delta;
-      _dragAngle += delta;
-    }
-
-    _lastAngle = currentAngle;
-    setState(() {});
-  }
-
-  void _onVinylDragUpdateAsHorizontal(DragUpdateDetails details) {
-    _onVinylDragUpdate(details);
   }
 
   void _onVinylDragEnd(DragEndDetails details) {
     _isDragging = false;
-    _dragAngle = 0;
-    _dragVelocity = 0;
+    // Permanently apply the drag delta to the base angle.
+    _baseAngle = _dragStartAngle + _draggingDelta;
+    _draggingDelta = 0;
+
     final player = context.read<PlayerProvider>();
     final duration = player.player.duration;
     final position = player.player.position;
-    if (duration != null && position != null) {
-      final limitMs = duration.inMilliseconds - 1000;
-      if (position.inMilliseconds < limitMs && player.isPlaying) {
-        _rotationController.repeat();
-      }
+    if (duration != null &&
+        position != null &&
+        position.inMilliseconds < duration.inMilliseconds - 1000 &&
+        player.isPlaying) {
+      _rotationController.repeat();
     }
     setState(() {});
   }
@@ -183,9 +144,16 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
         final labelRadius = widget.size * 0.45;
         final glowSize = widget.size + 60;
 
+        // Total visual rotation = base angle + current drag delta +
+        //   controller loop progress.
+        // We put base + drag delta into a Transform.rotate and let
+        // RotationTransition handle the looping on top.
+        final staticAngle = _baseAngle + _draggingDelta;
+
         return Stack(
           alignment: Alignment.center,
           children: [
+            // Glow halo
             Container(
               width: glowSize,
               height: glowSize,
@@ -201,8 +169,9 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
                 ],
               ),
             ),
+            // Static rotation layer (survives across drag gestures)
             Transform.rotate(
-              angle: _isDragging ? _dragAngle : 0,
+              angle: staticAngle,
               child: RotationTransition(
                 turns: _rotationController,
                 child: SizedBox(
@@ -216,12 +185,6 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
                         onPanStart: _onVinylDragStart,
                         onPanUpdate: _onVinylDragUpdate,
                         onPanEnd: _onVinylDragEnd,
-                        onVerticalDragStart: _onVinylDragStart,
-                        onVerticalDragUpdate: _onVinylDragUpdateAsVertical,
-                        onVerticalDragEnd: _onVinylDragEnd,
-                        onHorizontalDragStart: _onVinylDragStart,
-                        onHorizontalDragUpdate: _onVinylDragUpdateAsHorizontal,
-                        onHorizontalDragEnd: _onVinylDragEnd,
                         child: CustomPaint(
                           size: Size(widget.size, widget.size),
                           painter: _VinylPainter(
@@ -235,19 +198,23 @@ class _VinylRecordState extends State<VinylRecord> with SingleTickerProviderStat
                       ClipOval(
                         child: GestureDetector(
                           onTap: () => playerProvider.togglePlayPause(),
-                          child: Container(
+                          child: SizedBox(
                             width: labelRadius,
                             height: labelRadius,
-                            child: widget.albumArt != null && widget.albumArt!.isNotEmpty
-                                ? Image.memory(
-                                    widget.albumArt!,
-                                    fit: BoxFit.cover,
-                                    gaplessPlayback: true,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return _fallbackLabel(labelRadius, accent);
-                                    },
-                                  )
-                                : _fallbackLabel(labelRadius, accent),
+                            child:
+                                widget.albumArt != null &&
+                                        widget.albumArt!.isNotEmpty
+                                    ? Image.memory(
+                                        widget.albumArt!,
+                                        fit: BoxFit.cover,
+                                        gaplessPlayback: true,
+                                        errorBuilder:
+                                            (context, error, stackTrace) {
+                                          return _fallbackLabel(
+                                              labelRadius, accent);
+                                        },
+                                      )
+                                    : _fallbackLabel(labelRadius, accent),
                           ),
                         ),
                       ),
@@ -312,18 +279,20 @@ class _VinylPainter extends CustomPainter {
     for (int i = 0; i < 8; i++) {
       final grooveRadius = radius * (0.55 + (i * 0.05));
       final groovePaint = Paint()
-        ..color = Colors.white.withOpacity(0.03 + (i % 2 == 0 ? 0.02 : -0.01))
+        ..color =
+            Colors.white.withOpacity(0.03 + (i % 2 == 0 ? 0.02 : -0.01))
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1;
       canvas.drawCircle(center, grooveRadius, groovePaint);
     }
 
-    if (isPlaying && fftData.isNotEmpty && !isDragging) {
+    if ((isPlaying || isDragging) && fftData.isNotEmpty) {
       _drawCircularVisualizer(canvas, center, radius);
     }
   }
 
-  void _drawCircularVisualizer(Canvas canvas, Offset center, double vinylRadius) {
+  void _drawCircularVisualizer(
+      Canvas canvas, Offset center, double vinylRadius) {
     final barCount = fftData.length;
     final angleStep = (2 * math.pi) / barCount;
     final innerRadius = vinylRadius + 2;

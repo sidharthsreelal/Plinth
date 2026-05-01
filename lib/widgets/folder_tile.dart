@@ -7,12 +7,14 @@ class FolderTile extends StatelessWidget {
   final FolderNode folder;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool isPinned;
 
   const FolderTile({
     super.key,
     required this.folder,
     required this.onTap,
     this.onLongPress,
+    this.isPinned = false,
   });
 
   @override
@@ -21,10 +23,33 @@ class FolderTile extends StatelessWidget {
       builder: (context, themeProvider, child) {
         final accent = themeProvider.accentColor.color;
         return ListTile(
-          leading: Icon(
-            Icons.folder_rounded,
-            color: accent,
-            size: 32,
+          leading: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(
+                Icons.folder_rounded,
+                color: accent,
+                size: 32,
+              ),
+              if (isPinned)
+                Positioned(
+                  right: -4,
+                  top: -4,
+                  child: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.push_pin_rounded,
+                      color: Colors.black,
+                      size: 9,
+                    ),
+                  ),
+                ),
+            ],
           ),
           title: Text(
             folder.name,
@@ -36,9 +61,9 @@ class FolderTile extends StatelessWidget {
             '${folder.totalTrackCount} tracks',
             style: Theme.of(context).textTheme.bodySmall,
           ),
-          trailing: Icon(
+          trailing: const Icon(
             Icons.chevron_right_rounded,
-            color: const Color(0xFF8E8E93),
+            color: Color(0xFF8E8E93),
           ),
           onTap: onTap,
           onLongPress: onLongPress,

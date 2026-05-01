@@ -10,13 +10,16 @@ dependencies:
   flutter:
     sdk: flutter
   just_audio: ^0.9.40
+  just_audio_background: ^0.0.1-beta.12
+  audio_service: ^0.18.12
+  audio_session: ^0.1.21
   file_picker: ^8.1.2
   audio_metadata_reader: ^1.1.0
   permission_handler: ^11.3.1
   provider: ^6.1.2
   shared_preferences: ^2.3.2
-  path: ^1.9.0
-  path_provider: ^2.1.4
+  path: ^1.9.1
+  path_provider: ^2.1.5
   google_fonts: ^6.2.1
 
 dev_dependencies:

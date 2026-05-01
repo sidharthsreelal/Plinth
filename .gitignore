@@ -41,3 +41,10 @@ app.*.map.json
 /android/app/release
 plinth_system_prompt.md
 PROJECT.md
+
+
+
+.gemini/
+.vscode/
+AGENTS.md
+GEMINI.md

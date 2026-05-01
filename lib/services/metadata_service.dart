@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:plinth/models/audio_file.dart';
 
 class MetadataService {
@@ -26,6 +25,7 @@ class MetadataService {
     String album = 'Unknown Album';
     Duration duration = Duration.zero;
     Uint8List? albumArt;
+    int? trackNumber;
 
     try {
       final metadata = readMetadata(file, getImage: true);
@@ -41,23 +41,19 @@ class MetadataService {
       if (metadata.duration != null) {
         duration = metadata.duration!;
       }
+
+      // Extract track number — audio_metadata_reader exposes it as trackNumber
+      trackNumber = metadata.trackNumber;
     } catch (e) {
       debugPrint('MetadataService: metadata extraction failed for ${path.basename(file.path)}: $e');
     }
 
-    if (duration == Duration.zero && !kIsWeb) {
-      try {
-        final player = AudioPlayer();
-        await player.setFilePath(file.path);
-        final dur = player.duration;
-        if (dur != null) {
-          duration = dur;
-        }
-        await player.dispose();
-      } catch (e) {
-        debugPrint('MetadataService: just_audio duration failed: $e');
-      }
-    }
+    // NOTE: We intentionally do NOT spin up a new AudioPlayer here for a
+    // duration fallback. That was causing startup/re-scan hangs because
+    // creating hundreds of AudioPlayer instances in sequence is very slow
+    // and leaks Android audio session handles. If duration is zero after
+    // metadata extraction it will show as "--:--" in the UI, which is
+    // acceptable for edge-case files.
 
     return AudioFile(
       path: file.path,
@@ -68,6 +64,7 @@ class MetadataService {
       duration: duration,
       albumArt: albumArt,
       audioBytes: audioBytes,
+      trackNumber: trackNumber,
     );
   }
 

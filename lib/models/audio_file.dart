@@ -14,6 +14,7 @@ class AudioFile {
   final Duration duration;
   final Uint8List? albumArt;
   final Uint8List? audioBytes;
+  final int? trackNumber;
 
   AudioFile({
     required this.path,
@@ -24,6 +25,7 @@ class AudioFile {
     required this.duration,
     this.albumArt,
     this.audioBytes,
+    this.trackNumber,
   });
 
   AudioFile copyWith({
@@ -35,6 +37,7 @@ class AudioFile {
     Duration? duration,
     Uint8List? albumArt,
     Uint8List? audioBytes,
+    int? trackNumber,
   }) {
     return AudioFile(
       path: path ?? this.path,
@@ -45,6 +48,7 @@ class AudioFile {
       duration: duration ?? this.duration,
       albumArt: albumArt ?? this.albumArt,
       audioBytes: audioBytes ?? this.audioBytes,
+      trackNumber: trackNumber ?? this.trackNumber,
     );
   }
 
@@ -57,6 +61,7 @@ class AudioFile {
       'artist': artist,
       'album': album,
       'durationMs': duration.inMilliseconds,
+      if (trackNumber != null) 'trackNumber': trackNumber,
     };
   }
 
@@ -69,6 +74,7 @@ class AudioFile {
       album: json['album'] as String,
       duration: Duration(milliseconds: json['durationMs'] as int),
       albumArt: null,
+      trackNumber: json['trackNumber'] as int?,
     );
   }
 

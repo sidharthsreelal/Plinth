@@ -1,9 +1,29 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:plinth/models/folder_node.dart';
 import 'package:plinth/models/audio_file.dart';
 import 'package:plinth/services/file_scanner.dart';
+
+/// Runs inside an isolate: scans the filesystem and returns the JSON-serialised
+/// folder tree. We cannot pass FolderNode objects across isolates (they contain
+/// Uint8List album art which is fine, but ChangeNotifier is not), so we
+/// serialise to plain Maps and deserialise back on the main isolate.
+Future<Map<String, dynamic>> _scanInIsolate(String rootPath) async {
+  final scanner = FileScanner();
+  final node = await scanner.scanFolder(rootPath);
+  return _folderNodeToJson(node);
+}
+
+Map<String, dynamic> _folderNodeToJson(FolderNode node) {
+  return {
+    'name': node.name,
+    'path': node.path,
+    'subFolders': node.subFolders.map(_folderNodeToJson).toList(),
+    'audioFiles': node.audioFiles.map((audio) => audio.toJson()).toList(),
+  };
+}
 
 class LibraryProvider extends ChangeNotifier {
   FolderNode? _rootFolder;
@@ -22,6 +42,8 @@ class LibraryProvider extends ChangeNotifier {
 
   Future<void> init() async {
     if (kIsWeb) {
+      _isInitialized = true;
+      notifyListeners();
       return;
     }
 
@@ -33,7 +55,8 @@ class LibraryProvider extends ChangeNotifier {
       final savedJson = prefs.getString('saved_library');
       if (savedJson != null) {
         try {
-          _rootFolder = await _loadCachedFolderNode(jsonDecode(savedJson));
+          _rootFolder = await _loadCachedFolderNode(
+              jsonDecode(savedJson) as Map<String, dynamic>);
         } catch (e) {
           debugPrint('LibraryProvider: Failed to load saved library: $e');
           _rootFolder = null;
@@ -45,16 +68,22 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   Future<FolderNode> _loadCachedFolderNode(Map<String, dynamic> json) async {
-    final audioFiles = <AudioFile>[];
-    for (final e in json['audioFiles'] as List) {
-      final audio = AudioFile.fromJson(e as Map<String, dynamic>);
-      final cachedArt = await AudioFile.loadCachedAlbumArt(audio.path);
-      audioFiles.add(audio.copyWith(albumArt: cachedArt));
-    }
-    final subFolders = <FolderNode>[];
-    for (final e in json['subFolders'] as List) {
-      subFolders.add(await _loadCachedFolderNode(e as Map<String, dynamic>));
-    }
+    // Load all audio file artwork in parallel instead of sequentially.
+    final rawAudioList = json['audioFiles'] as List;
+    final audioFiles = await Future.wait(
+      rawAudioList.map((e) async {
+        final audio = AudioFile.fromJson(e as Map<String, dynamic>);
+        final cachedArt = await AudioFile.loadCachedAlbumArt(audio.path);
+        return audio.copyWith(albumArt: cachedArt);
+      }),
+    );
+
+    // Recurse into subfolders in parallel.
+    final rawSubList = json['subFolders'] as List;
+    final subFolders = await Future.wait(
+      rawSubList.map((e) => _loadCachedFolderNode(e as Map<String, dynamic>)),
+    );
+
     return FolderNode(
       name: json['name'] as String,
       path: json['path'] as String,
@@ -64,10 +93,7 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   Future<void> setRootFolder(String path) async {
-    if (kIsWeb) {
-      return;
-    }
-
+    if (kIsWeb) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('root_folder_path', path);
     _rootPath = path;
@@ -75,20 +101,27 @@ class LibraryProvider extends ChangeNotifier {
     await scanFolder(path);
   }
 
+  /// Scans the filesystem in a background isolate so the UI stays responsive.
+  /// The scanning indicator will be visible while this runs.
   Future<void> scanFolder(String path) async {
-    if (kIsWeb) {
-      return;
-    }
+    if (kIsWeb) return;
 
     _isScanning = true;
     notifyListeners();
 
     try {
-      final scanner = FileScanner();
-      _rootFolder = await scanner.scanFolder(path);
+      // Run the file scan in a separate isolate so it doesn't block the UI thread.
+      final jsonMap = await compute(_scanInIsolate, path);
 
+      // Deserialise + load cached artwork back on the main isolate.
+      _rootFolder = await _loadCachedFolderNode(jsonMap);
+
+      // Cache the raw JSON (without artwork bytes) for next startup.
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('saved_library', jsonEncode(_folderNodeToJson(_rootFolder!)));
+      await prefs.setString('saved_library', jsonEncode(jsonMap));
+
+      // Also persist individual artwork files for each audio file.
+      _cacheArtworkInBackground(_rootFolder!);
     } catch (e) {
       debugPrint('LibraryProvider: Scan error: $e');
       _rootFolder = null;
@@ -96,6 +129,16 @@ class LibraryProvider extends ChangeNotifier {
 
     _isScanning = false;
     notifyListeners();
+  }
+
+  /// Fire-and-forget artwork caching — does not block the UI or the scan result.
+  void _cacheArtworkInBackground(FolderNode node) {
+    for (final audio in node.audioFiles) {
+      audio.cacheAlbumArt();
+    }
+    for (final sub in node.subFolders) {
+      _cacheArtworkInBackground(sub);
+    }
   }
 
   Future<void> setWebAudioFiles(List<AudioFile> files) async {
@@ -125,14 +168,5 @@ class LibraryProvider extends ChangeNotifier {
     _webAudioFiles = [];
     _hasFolder = false;
     notifyListeners();
-  }
-
-  Map<String, dynamic> _folderNodeToJson(FolderNode node) {
-    return {
-      'name': node.name,
-      'path': node.path,
-      'subFolders': node.subFolders.map(_folderNodeToJson).toList(),
-      'audioFiles': node.audioFiles.map((audio) => audio.toJson()).toList(),
-    };
   }
 }

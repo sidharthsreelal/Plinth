@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Curated accent palette for Plinth.
+/// Red is the default — warm, energetic, fits a music player well.
+/// All colours are chosen to look good on the pure-black (#0D0D0D) background.
 enum AccentColor {
   red('Red', Color(0xFFFF3B30)),
-  electricYellow('Electric Yellow', Color(0xFFE8FF47)),
-  blue('Blue', Color(0xFF0A84FF)),
-  green('Green', Color(0xFF30D158)),
-  orange('Orange', Color(0xFFFF9F0A)),
-  purple('Purple', Color(0xFFBF5AF2)),
-  pink('Pink', Color(0xFFFF375F));
+  amber('Amber', Color(0xFFFFAB40)),
+  coral('Coral', Color(0xFFFF6B6B)),
+  teal('Teal', Color(0xFF00BFA5)),
+  violet('Violet', Color(0xFF9C6FDE)),
+  slate('Slate Blue', Color(0xFF5C8EFF));
 
   final String label;
   final Color color;

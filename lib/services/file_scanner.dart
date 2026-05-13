@@ -54,7 +54,11 @@ class FileScanner {
         if (_audioExtensions.contains(ext)) {
           try {
             final audioFile = await MetadataService.extract(entity);
-            await audioFile.cacheAlbumArt();
+            // NOTE: Do NOT call audioFile.cacheAlbumArt() here — this code
+            // runs inside a compute() isolate where Flutter platform channels
+            // (needed by getApplicationCacheDirectory) are not available.
+            // Art caching is performed on the main thread by LibraryProvider
+            // after the scan completes.
             audioFiles.add(audioFile);
           } catch (e) {
             debugPrint('FileScanner: Error extracting metadata from ${entity.path}: $e');

@@ -3,8 +3,10 @@ import 'package:provider/provider.dart';
 import 'package:plinth/models/audio_file.dart';
 import 'package:plinth/models/folder_node.dart';
 import 'package:plinth/providers/library_provider.dart';
+import 'package:plinth/providers/pins_provider.dart';
 import 'package:plinth/providers/player_provider.dart';
 import 'package:plinth/providers/theme_provider.dart';
+import 'package:plinth/screens/folder_browser_screen.dart';
 import 'package:plinth/screens/now_playing_screen.dart';
 
 class SearchScreen extends StatefulWidget {
@@ -118,7 +120,7 @@ class _SearchScreenState extends State<SearchScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
           child: Text(
-            '${results.length} result${results.length == 1 ? '' : 's'} · swipe right to queue',
+            '${results.length} result${results.length == 1 ? '' : 's'} · swipe right to queue · long-press for options',
             style: const TextStyle(
               color: Color(0xFF8E8E93),
               fontSize: 12,
@@ -150,11 +152,158 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                   );
                 },
+                onLongPress: () => _showAudioOptions(context, audio, accent),
               );
             },
           ),
         ),
       ],
+    );
+  }
+
+  void _showAudioOptions(BuildContext context, AudioFile audio, Color accent) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Consumer<PinsProvider>(
+          builder: (ctx2, pins, _) {
+            final isPinned = pins.isPinned(audio.path);
+            final title = audio.title.isNotEmpty ? audio.title : audio.fileName;
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Drag handle
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF48484A),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  // Song label
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        color: Color(0xFF8E8E93),
+                        fontSize: 13,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const Divider(color: Color(0xFF2C2C2E), height: 1),
+                  // Play Next
+                  ListTile(
+                    leading: const Icon(Icons.playlist_add_rounded,
+                        color: Color(0xFF8E8E93)),
+                    title: const Text('Play Next'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      context.read<PlayerProvider>().addToPlayNext(audio);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Row(
+                            children: [
+                              const Icon(Icons.playlist_add_rounded,
+                                  color: Color(0xFF0D0D0D), size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Playing next: $title',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: Color(0xFF0D0D0D),
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
+                          backgroundColor: accent,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          duration: const Duration(seconds: 2),
+                          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        ),
+                      );
+                    },
+                  ),
+                  // Pin / Unpin
+                  ListTile(
+                    leading: Icon(
+                      isPinned
+                          ? Icons.push_pin_rounded
+                          : Icons.push_pin_outlined,
+                      color: isPinned ? accent : const Color(0xFF8E8E93),
+                    ),
+                    title: Text(isPinned ? 'Unpin Song' : 'Pin Song'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      pins.toggleAudioFile(audio);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content:
+                            Text(isPinned ? '$title unpinned' : '$title pinned'),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      ));
+                    },
+                  ),
+                  // Open in Folder
+                  ListTile(
+                    leading: const Icon(Icons.folder_open_rounded,
+                        color: Color(0xFF8E8E93)),
+                    title: const Text('Open in Folder'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openInFolder(context, audio);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _openInFolder(BuildContext context, AudioFile audio) {
+    final library = context.read<LibraryProvider>();
+    final parentFolder = library.findFolderContaining(audio.path);
+    if (parentFolder == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not locate folder')),
+      );
+      return;
+    }
+
+    // Pop search screen, then push the folder browser with the highlight
+    Navigator.pop(context); // close search
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (ctx, anim, _) => FadeTransition(
+          opacity: anim,
+          child: FolderBrowserScreen(
+            folder: parentFolder,
+            highlightPath: audio.path,
+          ),
+        ),
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
     );
   }
 
@@ -211,12 +360,14 @@ class _SearchResultTile extends StatefulWidget {
   final Color accent;
   final String query;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const _SearchResultTile({
     required this.audio,
     required this.accent,
     required this.query,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -280,6 +431,7 @@ class _SearchResultTileState extends State<_SearchResultTile> {
     return GestureDetector(
       onHorizontalDragUpdate: _onHorizontalDragUpdate,
       onHorizontalDragEnd: _onHorizontalDragEnd,
+      onLongPress: widget.onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Stack(
         children: [

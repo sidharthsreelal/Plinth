@@ -321,7 +321,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     onPressed: () => _showQueueSheet(
                                         context, player, accent),
                                   ),
-                                  if (player.playNextQueue.isNotEmpty)
+                                  if (player.hasPlayNext)
                                     Positioned(
                                       top: 6,
                                       right: 6,
@@ -451,15 +451,14 @@ class _QueueSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<PlayerProvider>(
       builder: (context, player, _) {
-        final playNextItems = List<AudioFile>.from(player.playNextQueue);
         final mainQueue = player.queue;
         final currentIdx = player.currentIndex;
-        final upcomingMain = currentIdx + 1 < mainQueue.length
+        // Everything ahead of the current track is the "up next" list.
+        // There is no separate playNextQueue shadow — play-next tracks are
+        // simply at the front of this upcoming segment.
+        final upcoming = currentIdx + 1 < mainQueue.length
             ? mainQueue.sublist(currentIdx + 1)
             : <AudioFile>[];
-
-        // Unified list: play-next items first, then upcoming main-queue tracks.
-        final unified = [...playNextItems, ...upcomingMain];
 
         return DraggableScrollableSheet(
           initialChildSize: 0.6,
@@ -505,14 +504,16 @@ class _QueueSheet extends StatelessWidget {
                               ),
                         ),
                         const Spacer(),
-                        if (unified.isNotEmpty)
+                        if (upcoming.isNotEmpty)
                           TextButton(
                             onPressed: () {
                               player.clearPlayNext();
-                              // Also clear all upcoming from main queue.
-                              for (int i = upcomingMain.length - 1;
-                                  i >= 0;
-                                  i--) {
+                              // Also clear remaining upcoming from main queue.
+                              final upcomingCount = upcoming.length -
+                                  (player.hasPlayNext
+                                      ? player.queue.length - player.currentIndex - 1
+                                      : upcoming.length);
+                              for (int i = upcoming.length - 1; i >= 0; i--) {
                                 player.removeFromUpcoming(i);
                               }
                             },
@@ -528,34 +529,32 @@ class _QueueSheet extends StatelessWidget {
                   ),
                   const Divider(
                       color: Color(0xFF2C2C2E), height: 1, thickness: 1),
-                  // Unified list
+                   // Queue list
                   Expanded(
-                    child: unified.isEmpty
+                    child: upcoming.isEmpty
                         ? _buildEmptyState()
                         : ReorderableListView.builder(
                             scrollController: scrollController,
                             padding: const EdgeInsets.only(
                                 bottom: 24, top: 4),
-                            itemCount: unified.length,
-                            onReorder: (oldIndex, newIndex) =>
-                                _onReorder(player, oldIndex, newIndex,
-                                    playNextItems.length,
-                                    upcomingMain.length),
+                            itemCount: upcoming.length,
+                            onReorder: (oldIndex, newIndex) {
+                              if (newIndex > oldIndex) newIndex -= 1;
+                              player.reorderUpcoming(oldIndex, newIndex);
+                            },
                             proxyDecorator: (child, index, animation) =>
                                 Material(
                                     color: Colors.transparent,
                                     child: child),
                             itemBuilder: (context, index) {
-                              final track = unified[index];
+                              final track = upcoming[index];
                               return _buildQueueRow(
                                 context,
                                 key: ValueKey(
                                     'q_${track.path}_$index'),
                                 track: track,
-                                onRemove: () => _onRemove(
-                                    player,
-                                    index,
-                                    playNextItems.length),
+                                onRemove: () =>
+                                    player.removeFromUpcoming(index),
                               );
                             },
                           ),
@@ -569,61 +568,6 @@ class _QueueSheet extends StatelessWidget {
     );
   }
 
-  /// Handles reorder across the play-next / main-queue boundary.
-  void _onReorder(
-    PlayerProvider player,
-    int oldIndex,
-    int newIndex,
-    int playNextCount,
-    int upcomingCount,
-  ) {
-    final bool fromPlayNext = oldIndex < playNextCount;
-
-    // Moving across or within buckets.
-    if (fromPlayNext) {
-      if (newIndex <= playNextCount) {
-        // Within Play-Next
-        player.reorderPlayNext(oldIndex, newIndex);
-      } else {
-        // Play-Next to Main Queue
-        final track = player.playNextQueue[oldIndex];
-        player.removeFromPlayNext(oldIndex);
-        // Correct target index in main queue: (newIndex - playNextCount)
-        // Since we removed 1 from playNextCount, the normalization happens naturally.
-        final targetInMain = newIndex - playNextCount;
-        final base = player.currentIndex + 1;
-        player.queue.insert(
-            (base + targetInMain).clamp(base, player.queue.length), track);
-        player.notifyListenersPublic();
-      }
-    } else {
-      final mainIdx = oldIndex - playNextCount;
-      if (newIndex >= playNextCount) {
-        // Within Main Queue
-        player.reorderUpcoming(mainIdx, newIndex - playNextCount);
-      } else {
-        // Main Queue to Play-Next
-        final mainSeq = player.queue;
-        final base = player.currentIndex + 1;
-        if (base + mainIdx < mainSeq.length) {
-          final track = mainSeq[base + mainIdx];
-          player.removeFromUpcoming(mainIdx);
-          player.insertIntoPlayNext(newIndex, track);
-        }
-      }
-    }
-  }
-
-
-  /// Removes from the correct bucket based on index.
-  void _onRemove(
-      PlayerProvider player, int index, int playNextCount) {
-    if (index < playNextCount) {
-      player.removeFromPlayNext(index);
-    } else {
-      player.removeFromUpcoming(index - playNextCount);
-    }
-  }
 
   Widget _buildQueueRow(
     BuildContext context, {

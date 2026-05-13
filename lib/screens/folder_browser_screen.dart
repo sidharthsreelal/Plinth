@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import 'package:plinth/models/audio_file.dart';
 import 'package:plinth/models/folder_node.dart';
@@ -15,15 +16,32 @@ enum _SortOrder { trackNumber, nameAZ, nameZA, dateModified }
 
 class FolderBrowserScreen extends StatefulWidget {
   final FolderNode folder;
+  /// When set, the screen will scroll to and briefly glow the tile at this path.
+  final String? highlightPath;
 
-  const FolderBrowserScreen({super.key, required this.folder});
+  const FolderBrowserScreen({
+    super.key,
+    required this.folder,
+    this.highlightPath,
+  });
 
   @override
   State<FolderBrowserScreen> createState() => _FolderBrowserScreenState();
 }
 
-class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
+class _FolderBrowserScreenState extends State<FolderBrowserScreen>
+    with SingleTickerProviderStateMixin {
   late _SortOrder _sortOrder;
+  final _scrollController = ScrollController();
+  String? _glowingPath;
+  AnimationController? _glowAnim;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _glowAnim?.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -31,6 +49,13 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
     // Read the persisted sort preference from ThemeProvider
     final key = context.read<ThemeProvider>().defaultSortOrderKey;
     _sortOrder = _sortOrderFromKey(key);
+
+    // If a highlight was requested, scroll to it after first frame.
+    if (widget.highlightPath != null) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _scrollToAndHighlight(widget.highlightPath!);
+      });
+    }
   }
 
   _SortOrder _sortOrderFromKey(String key) {
@@ -128,6 +153,7 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: widget.folder.subFolders.length + audioFiles.length,
               itemBuilder: (context, index) {
@@ -151,21 +177,28 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
                 } else {
                   final audioIndex = index - widget.folder.subFolders.length;
                   final audio = audioFiles[audioIndex];
+                  final key = GlobalObjectKey(audio.path);
+                  final isGlowing = _glowingPath == audio.path;
                   return Consumer<PlayerProvider>(
                     builder: (context, player, child) {
-                      return AudioTile(
-                        audio: audio,
-                        isPlaying: player.isPlaying,
-                        isCurrentTrack: player.currentTrack?.path == audio.path,
-                        onTap: () {
-                          // Pass sorted list so queue order matches what user sees
-                          player.playTrack(audio, audioFiles);
-                          Navigator.push(
-                            context,
-                            _createRoute(const NowPlayingScreen()),
-                          );
-                        },
-                        onLongPress: () => _showAudioOptions(context, audio),
+                      return _GlowingTileWrapper(
+                        key: key,
+                        isGlowing: isGlowing,
+                        glowAnim: isGlowing ? _glowAnim : null,
+                        child: AudioTile(
+                          audio: audio,
+                          isPlaying: player.isPlaying,
+                          isCurrentTrack: player.currentTrack?.path == audio.path,
+                          onTap: () {
+                            // Pass sorted list so queue order matches what user sees
+                            player.playTrack(audio, audioFiles);
+                            Navigator.push(
+                              context,
+                              _createRoute(const NowPlayingScreen()),
+                            );
+                          },
+                          onLongPress: () => _showAudioOptions(context, audio),
+                        ),
                       );
                     },
                   );
@@ -289,6 +322,52 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
       audio.addAll(_collectAllAudio(sub));
     }
     return audio;
+  }
+
+  void _scrollToAndHighlight(String audioPath) {
+    // Find the item index in the sorted audio list
+    final audioFiles = _sortedAudioFiles;
+    final audioIndex = audioFiles.indexWhere((a) => a.path == audioPath);
+    if (audioIndex == -1) return;
+
+    // Start glow animation (1.0 → 0.0 over 5 seconds)
+    _glowAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..addListener(() => setState(() {}));
+
+    setState(() => _glowingPath = audioPath);
+    _glowAnim!.forward();
+
+    // After animation completes, clear glow
+    _glowAnim!.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() => _glowingPath = null);
+      }
+    });
+
+    // Scroll: subFolders come first in the list
+    final listIndex = widget.folder.subFolders.length + audioIndex;
+    final estimatedOffset = listIndex * 64.0; // approximate tile height
+    _scrollController.animateTo(
+      estimatedOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.easeOutCubic,
+    );
+
+    // After scroll, use key to ensure tile is visible
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final key = GlobalObjectKey(audioPath);
+      final ctx = key.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          alignment: 0.3, // position tile 30% from top
+        );
+      }
+    });
   }
 
   void _showFolderOptions(BuildContext context, FolderNode subFolder) {
@@ -544,6 +623,53 @@ class _SortOption extends StatelessWidget {
           ? Icon(Icons.check_rounded, color: accent, size: 20)
           : null,
       onTap: onTap,
+    );
+  }
+}
+
+// ── Glow wrapper (highlights a tile when arriving via "Open in Folder") ───────
+
+class _GlowingTileWrapper extends StatelessWidget {
+  final Widget child;
+  final bool isGlowing;
+  final AnimationController? glowAnim;
+
+  const _GlowingTileWrapper({
+    super.key,
+    required this.child,
+    required this.isGlowing,
+    this.glowAnim,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isGlowing || glowAnim == null) return child;
+
+    final accent = context.read<ThemeProvider>().accentColor.color;
+    // Opacity fades from 0.35 → 0.0 as animation goes 0.0 → 1.0
+    final opacity = (1.0 - glowAnim!.value) * 0.35;
+
+    return Stack(
+      children: [
+        child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: accent.withOpacity(opacity),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withOpacity(opacity * 0.8),
+                    blurRadius: 16,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

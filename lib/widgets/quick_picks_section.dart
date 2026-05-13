@@ -1,7 +1,9 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:plinth/models/audio_file.dart';
 import 'package:plinth/providers/history_provider.dart';
+import 'package:plinth/providers/library_provider.dart';
 import 'package:plinth/providers/player_provider.dart';
 import 'package:plinth/providers/theme_provider.dart';
 import 'package:plinth/screens/now_playing_screen.dart';
@@ -14,9 +16,14 @@ class QuickPicksSection extends StatelessWidget {
     return Consumer2<HistoryProvider, ThemeProvider>(
       builder: (context, history, themeProvider, _) {
         final picks = history.quickPicks;
-        if (picks.isEmpty) return const SizedBox.shrink();
-
         final accent = themeProvider.accentColor.color;
+
+        // Show the section if we have picks OR if the library is loaded
+        // (so the dice card is always accessible).
+        final library = context.watch<LibraryProvider>();
+        final hasLibrary = library.rootFolder != null;
+
+        if (picks.isEmpty && !hasLibrary) return const SizedBox.shrink();
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -49,10 +56,15 @@ class QuickPicksSection extends StatelessWidget {
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: picks.length,
+                // +1 for the dice card always at the front
+                itemCount: picks.length + 1,
                 itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _ShuffleDiceCard(accent: accent);
+                  }
+                  final track = picks[index - 1];
                   return _QuickPickCard(
-                    track: picks[index],
+                    track: track,
                     accent: accent,
                     allPicks: picks,
                   );
@@ -72,6 +84,166 @@ class QuickPicksSection extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shuffle Dice Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ShuffleDiceCard extends StatefulWidget {
+  final Color accent;
+  const _ShuffleDiceCard({required this.accent});
+
+  @override
+  State<_ShuffleDiceCard> createState() => _ShuffleDiceCardState();
+}
+
+class _ShuffleDiceCardState extends State<_ShuffleDiceCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shakeCtrl;
+  late final Animation<double> _shake;
+
+  @override
+  void initState() {
+    super.initState();
+    _shakeCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 420),
+    );
+    _shake = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0, end: -0.12), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -0.12, end: 0.12), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 0.12, end: -0.08), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -0.08, end: 0.08), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 0.08, end: 0), weight: 1),
+    ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _shakeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onTap() async {
+    final library = context.read<LibraryProvider>();
+    final player = context.read<PlayerProvider>();
+
+    final allTracks = library.getAllTracks();
+    if (allTracks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No tracks found in library.')),
+      );
+      return;
+    }
+
+    // Shake animation first, then play
+    _shakeCtrl.forward(from: 0);
+
+    // Shuffle all tracks from every folder
+    final shuffled = List<AudioFile>.from(allTracks)..shuffle(Random());
+    final startTrack = shuffled.first;
+
+    await Future.delayed(const Duration(milliseconds: 250));
+
+    player.playTrack(startTrack, shuffled);
+
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, _) => FadeTransition(
+          opacity: animation,
+          child: const NowPlayingScreen(),
+        ),
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accent;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: GestureDetector(
+        onTap: _onTap,
+        child: SizedBox(
+          width: 124,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AnimatedBuilder(
+                animation: _shake,
+                builder: (context, child) {
+                  return Transform.rotate(
+                    angle: _shake.value,
+                    child: child,
+                  );
+                },
+                child: Container(
+                  width: 124,
+                  height: 124,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: accent.withOpacity(0.5), width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withOpacity(0.2),
+                        blurRadius: 12,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: CustomPaint(
+                    painter: _DiceFivePainter(accent),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Die face showing a 5 (quincunx pattern)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DiceFivePainter extends CustomPainter {
+  final Color color;
+  const _DiceFivePainter(this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final r = size.width * 0.09;
+    final pad = size.width * 0.22;
+
+    // Die 5: corners + center
+    final dots = [
+      Offset(pad, pad),                         // top-left
+      Offset(size.width - pad, pad),             // top-right
+      Offset(size.width / 2, size.height / 2),  // center
+      Offset(pad, size.height - pad),            // bottom-left
+      Offset(size.width - pad, size.height - pad), // bottom-right
+    ];
+
+    for (final dot in dots) {
+      canvas.drawCircle(dot, r, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DiceFivePainter old) => old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Regular quick-pick card
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _QuickPickCard extends StatelessWidget {
   final AudioFile track;

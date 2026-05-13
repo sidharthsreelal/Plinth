@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:isolate';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:plinth/models/folder_node.dart';
@@ -21,7 +21,18 @@ Map<String, dynamic> _folderNodeToJson(FolderNode node) {
     'name': node.name,
     'path': node.path,
     'subFolders': node.subFolders.map(_folderNodeToJson).toList(),
+    // toJson() includes albumArtB64 so art bytes cross the isolate boundary.
     'audioFiles': node.audioFiles.map((audio) => audio.toJson()).toList(),
+  };
+}
+
+/// Lean version (no art bytes) for storing to SharedPreferences.
+Map<String, dynamic> _folderNodeToJsonLean(FolderNode node) {
+  return {
+    'name': node.name,
+    'path': node.path,
+    'subFolders': node.subFolders.map(_folderNodeToJsonLean).toList(),
+    'audioFiles': node.audioFiles.map((audio) => audio.toJsonWithoutArt()).toList(),
   };
 }
 
@@ -68,13 +79,18 @@ class LibraryProvider extends ChangeNotifier {
   }
 
   Future<FolderNode> _loadCachedFolderNode(Map<String, dynamic> json) async {
-    // Load all audio file artwork in parallel instead of sequentially.
+    // Deserialize audio files — art bytes come via albumArtB64 (if present).
     final rawAudioList = json['audioFiles'] as List;
     final audioFiles = await Future.wait(
       rawAudioList.map((e) async {
         final audio = AudioFile.fromJson(e as Map<String, dynamic>);
-        final cachedArt = await AudioFile.loadCachedAlbumArt(audio.path);
-        return audio.copyWith(albumArt: cachedArt);
+        // If no art came via the JSON (startup-from-cache path), fall back to
+        // the on-disk cache written during a previous scan.
+        if (audio.albumArt == null) {
+          final cachedArt = await AudioFile.loadCachedAlbumArt(audio.path);
+          return audio.copyWith(albumArt: cachedArt);
+        }
+        return audio;
       }),
     );
 
@@ -111,17 +127,19 @@ class LibraryProvider extends ChangeNotifier {
 
     try {
       // Run the file scan in a separate isolate so it doesn't block the UI thread.
+      // The JSON returned includes albumArtB64 bytes so art crosses the boundary.
       final jsonMap = await compute(_scanInIsolate, path);
 
-      // Deserialise + load cached artwork back on the main isolate.
+      // Deserialise + hydrate art bytes back on the main isolate.
       _rootFolder = await _loadCachedFolderNode(jsonMap);
 
-      // Cache the raw JSON (without artwork bytes) for next startup.
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('saved_library', jsonEncode(jsonMap));
-
-      // Also persist individual artwork files for each audio file.
+      // Persist art to the on-disk cache (main thread — platform channels work here).
       _cacheArtworkInBackground(_rootFolder!);
+
+      // Save lean JSON (no art bytes) to SharedPreferences for next startup.
+      final leanJson = _folderNodeToJsonLean(_rootFolder!);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('saved_library', jsonEncode(leanJson));
     } catch (e) {
       debugPrint('LibraryProvider: Scan error: $e');
       _rootFolder = null;
@@ -168,5 +186,37 @@ class LibraryProvider extends ChangeNotifier {
     _webAudioFiles = [];
     _hasFolder = false;
     notifyListeners();
+  }
+
+  /// Returns every AudioFile in the library, recursively collected across
+  /// all folders. Used by the Shuffle All / dice feature.
+  List<AudioFile> getAllTracks() {
+    if (_rootFolder == null) return [];
+    final result = <AudioFile>[];
+    _collectTracks(_rootFolder!, result);
+    return result;
+  }
+
+  void _collectTracks(FolderNode node, List<AudioFile> out) {
+    out.addAll(node.audioFiles);
+    for (final sub in node.subFolders) {
+      _collectTracks(sub, out);
+    }
+  }
+
+  /// Returns the [FolderNode] that directly contains the audio file at [audioPath].
+  /// Returns null if not found.
+  FolderNode? findFolderContaining(String audioPath) {
+    if (_rootFolder == null) return null;
+    return _findFolderContaining(_rootFolder!, audioPath);
+  }
+
+  FolderNode? _findFolderContaining(FolderNode node, String audioPath) {
+    if (node.audioFiles.any((a) => a.path == audioPath)) return node;
+    for (final sub in node.subFolders) {
+      final found = _findFolderContaining(sub, audioPath);
+      if (found != null) return found;
+    }
+    return null;
   }
 }

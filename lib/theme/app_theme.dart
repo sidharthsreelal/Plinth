@@ -8,6 +8,7 @@ enum AccentColor {
   red('Red', Color(0xFFFF3B30)),
   amber('Amber', Color(0xFFFFAB40)),
   coral('Coral', Color(0xFFFF6B6B)),
+  olive('Olive', Color(0xFF0C4404)), // Darker, more sophisticated olive
   teal('Teal', Color(0xFF00BFA5)),
   violet('Violet', Color(0xFF9C6FDE)),
   slate('Slate Blue', Color(0xFF5C8EFF));

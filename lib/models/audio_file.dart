@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+
 class AudioFile {
   final String path;
   final String fileName;
@@ -53,7 +54,24 @@ class AudioFile {
   }
 
 
+  /// Full serialization — includes albumArt bytes so they can cross an isolate
+  /// boundary (compute() returns plain Maps, not typed objects).
   Map<String, dynamic> toJson() {
+    return {
+      'path': path,
+      'fileName': fileName,
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'durationMs': duration.inMilliseconds,
+      if (trackNumber != null) 'trackNumber': trackNumber,
+      if (albumArt != null) 'albumArtB64': base64Encode(albumArt!),
+    };
+  }
+
+  /// Lean serialization without art bytes — used when persisting to
+  /// SharedPreferences to avoid bloating storage.
+  Map<String, dynamic> toJsonWithoutArt() {
     return {
       'path': path,
       'fileName': fileName,
@@ -66,6 +84,14 @@ class AudioFile {
   }
 
   static AudioFile fromJson(Map<String, dynamic> json) {
+    Uint8List? albumArt;
+    if (json['albumArtB64'] != null) {
+      try {
+        albumArt = base64Decode(json['albumArtB64'] as String);
+      } catch (_) {
+        albumArt = null;
+      }
+    }
     return AudioFile(
       path: json['path'] as String,
       fileName: json['fileName'] as String,
@@ -73,7 +99,7 @@ class AudioFile {
       artist: json['artist'] as String,
       album: json['album'] as String,
       duration: Duration(milliseconds: json['durationMs'] as int),
-      albumArt: null,
+      albumArt: albumArt,
       trackNumber: json['trackNumber'] as int?,
     );
   }

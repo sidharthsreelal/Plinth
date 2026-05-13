@@ -24,9 +24,10 @@ class PlayerProvider extends ChangeNotifier {
   LoopMode _loopMode = LoopMode.off;
   List<double> _fftData = List.filled(64, 0);
 
-  /// Tracks queued via "play next" (swipe-right).
-  /// These are immediately injected into the active [_playlist] but filtered here for UI.
-  final List<AudioFile> _playNextQueue = [];
+  /// Number of tracks that have been inserted as "play next" and are still
+  /// waiting ahead of the current index. This is purely a counter so the
+  /// queue badge dot can still appear. The actual tracks live in _queue.
+  int _playNextCount = 0;
 
   // ── Sleep timer ──────────────────────────────────────────────────────
   Timer? _sleepTimer;
@@ -44,7 +45,8 @@ class PlayerProvider extends ChangeNotifier {
   // ── Getters ───────────────────────────────────────────────────────────
   AudioPlayer get player => _player;
   List<AudioFile> get queue => _queue;
-  List<AudioFile> get playNextQueue => List.unmodifiable(_playNextQueue);
+  /// True when there are play-next tracks ahead of the current position.
+  bool get hasPlayNext => _playNextCount > 0;
   int get currentIndex => _currentIndex;
   bool get isPlaying => _isPlaying;
   bool get shuffle => _shuffle;
@@ -157,11 +159,12 @@ class PlayerProvider extends ChangeNotifier {
   // ── Play-next queue API ───────────────────────────────────────────────
 
   bool addToPlayNext(AudioFile track) {
-    // Always insert immediately after the current track (at _currentIndex + 1).
-    // This means the most recently added track plays next — swipe A, then swipe
-    // B → queue becomes: [current] → B → A, matching "Play Next" semantics.
-    _playNextQueue.add(track);
-
+    // Insert immediately after the current track.
+    // Each swipe pushes the new track to position currentIndex+1, bumping
+    // previous play-next entries further along. Result:
+    //   swipe A → queue: [cur, A, ...rest]
+    //   swipe B → queue: [cur, B, A, ...rest]
+    // which matches "play next" semantics correctly.
     final insertIdx = _currentIndex + 1;
     if (insertIdx <= _queue.length) {
       _queue.insert(insertIdx, track);
@@ -170,40 +173,39 @@ class PlayerProvider extends ChangeNotifier {
       _queue.add(track);
       _sourceFor(track).then((src) => _playlist.add(src));
     }
-
+    _playNextCount++;
     notifyListeners();
     return true;
   }
 
   void removeFromPlayNext(int index) {
-    if (index >= 0 && index < _playNextQueue.length) {
-      final track = _playNextQueue.removeAt(index);
-      final qIdx = _queue.indexOf(track, _currentIndex + 1);
-      if (qIdx != -1) {
-        _queue.removeAt(qIdx);
-        _playlist.removeAt(qIdx);
-      }
+    // index here is relative to _currentIndex+1 in the main queue
+    final absIdx = _currentIndex + 1 + index;
+    if (absIdx < _queue.length) {
+      _queue.removeAt(absIdx);
+      _playlist.removeAt(absIdx);
+      if (_playNextCount > 0) _playNextCount--;
       notifyListeners();
     }
   }
 
   void clearPlayNext() {
-    for (var track in _playNextQueue) {
-      final qIdx = _queue.indexOf(track, _currentIndex + 1);
-      if (qIdx != -1) {
-        _queue.removeAt(qIdx);
-        _playlist.removeAt(qIdx);
+    // Remove all upcoming entries that were queued as play-next.
+    final removeCount = _playNextCount;
+    for (int i = removeCount - 1; i >= 0; i--) {
+      final absIdx = _currentIndex + 1 + i;
+      if (absIdx < _queue.length) {
+        _queue.removeAt(absIdx);
+        _playlist.removeAt(absIdx);
       }
     }
-    _playNextQueue.clear();
+    _playNextCount = 0;
     notifyListeners();
   }
 
   void reorderPlayNext(int oldIndex, int newIndex) {
-    if (oldIndex < newIndex) newIndex -= 1;
-    final item = _playNextQueue.removeAt(oldIndex);
-    _playNextQueue.insert(newIndex, item);
-    notifyListeners();
+    // Reorder within upcoming entries (same as reorderUpcoming)
+    reorderUpcoming(oldIndex, newIndex);
   }
 
   // ── Unified upcoming-queue API ────────────────────────────────────────
@@ -233,13 +235,11 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   void insertIntoPlayNext(int index, AudioFile track) {
-    final clampedIndex = index.clamp(0, _playNextQueue.length);
-    _playNextQueue.insert(clampedIndex, track);
-
-    final targetIdx = _currentIndex + 1 + clampedIndex;
-    _queue.insert(targetIdx, track);
-    _sourceFor(track).then((src) => _playlist.insert(targetIdx, src));
-
+    final insertIdx = (_currentIndex + 1 + index).clamp(
+        _currentIndex + 1, _queue.length);
+    _queue.insert(insertIdx, track);
+    _sourceFor(track).then((src) => _playlist.insert(insertIdx, src));
+    _playNextCount++;
     notifyListeners();
   }
 
@@ -250,7 +250,7 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> playTrack(AudioFile track, List<AudioFile> queue) async {
     _queue = List.from(queue);
     _originalQueue = List.from(queue);
-    _playNextQueue.clear();
+    _playNextCount = 0;
 
     // Determine the correct starting index.
     int startIndex = _queue.indexOf(track);

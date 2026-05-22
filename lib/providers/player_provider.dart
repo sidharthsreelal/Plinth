@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
@@ -36,11 +37,29 @@ class PlayerProvider extends ChangeNotifier {
   Duration? get sleepRemaining => _sleepRemaining;
   bool get sleepTimerActive => _sleepTimer != null;
 
+  // ── Listen-time heartbeat ────────────────────────────────────────────
+  /// Fires every [_heartbeatInterval] while actively playing so that the
+  /// HistoryProvider can accumulate listen time even if the app is killed
+  /// without a clean pause event.
+  static const _heartbeatInterval = Duration(seconds: 5);
+  Timer? _heartbeatTimer;
+
   /// Callback invoked whenever a new track starts (index changed in native player).
   void Function(AudioFile)? onTrackStarted;
 
+  /// Callback invoked whenever a track starts — richer variant used by
+  /// HistoryProvider to record a play start + begin accumulating listen time.
+  void Function(AudioFile)? onTrackStartedWithFile;
+
   /// Callback invoked whenever a track completes naturally (reached the end).
   void Function(AudioFile)? onTrackCompleted;
+
+  /// Callback invoked when playback pauses (user-initiated or sleep timer).
+  /// HistoryProvider flushes the accumulated listen window on this event.
+  VoidCallback? onPlaybackPaused;
+
+  /// Callback invoked when playback resumes after a pause.
+  VoidCallback? onPlaybackResumed;
 
   // ── Getters ───────────────────────────────────────────────────────────
   AudioPlayer get player => _player;
@@ -74,14 +93,29 @@ class PlayerProvider extends ChangeNotifier {
     _player.currentIndexStream.listen((index) {
       if (index != null && index != _currentIndex && index < _queue.length) {
         _currentIndex = index;
-        onTrackStarted?.call(_queue[_currentIndex]);
+        _fireTrackStarted(_queue[_currentIndex]);
         notifyListeners();
       }
     });
 
+    bool _wasPlaying = false;
+
     _player.playerStateStream.listen((state) {
-      _isPlaying = state.playing;
-      if (!state.playing) {
+      final nowPlaying = state.playing;
+
+      if (!_wasPlaying && nowPlaying) {
+        // Transition: paused → playing (resume)
+        onPlaybackResumed?.call();
+        _startHeartbeat();
+      } else if (_wasPlaying && !nowPlaying) {
+        // Transition: playing → paused
+        onPlaybackPaused?.call();
+        _stopHeartbeat();
+      }
+      _wasPlaying = nowPlaying;
+
+      _isPlaying = nowPlaying;
+      if (!nowPlaying) {
         _fftData = List.filled(64, 0);
       }
 
@@ -101,11 +135,35 @@ class PlayerProvider extends ChangeNotifier {
     });
   }
 
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
+      // onHeartbeat is wired in main.dart → historyProvider.heartbeat()
+      onHeartbeat?.call();
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
+  /// Fires every [_heartbeatInterval] while playing. Wire to
+  /// HistoryProvider.heartbeat() in main.dart.
+  VoidCallback? onHeartbeat;
+
   void _handleTrackCompleted() {
     final track = currentTrack;
     if (track != null) {
       onTrackCompleted?.call(track);
     }
+  }
+
+  // Override the track-started firing to also call the richer callback.
+  void _fireTrackStarted(AudioFile track) {
+    onTrackStarted?.call(track);
+    onTrackStartedWithFile?.call(track);
+    _startHeartbeat();
   }
 
   // ── Artwork Caching ───────────────────────────────────────────────────
@@ -274,9 +332,9 @@ class PlayerProvider extends ChangeNotifier {
       await _player.setAudioSource(_playlist, initialIndex: startIndex);
       await _player.play();
 
-      // onTrackStarted is fired here explicitly rather than relying on the
+      // Fire both callbacks explicitly rather than relying on the
       // currentIndexStream event (which fires at 0 before seeking).
-      onTrackStarted?.call(track);
+      _fireTrackStarted(track);
     } catch (e) {
       debugPrint('Error playing track: $e');
     }
@@ -435,6 +493,7 @@ class PlayerProvider extends ChangeNotifier {
   @override
   void dispose() {
     _sleepTimer?.cancel();
+    _heartbeatTimer?.cancel();
     _player.dispose();
     super.dispose();
   }

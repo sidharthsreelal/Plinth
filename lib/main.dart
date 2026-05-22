@@ -68,7 +68,13 @@ class PlinthApp extends StatelessWidget {
     final libraryProvider = LibraryProvider();
     final playerProvider = PlayerProvider();
 
-    // A track only counts as "played" when naturally completed (not on skip).
+    // Wire all listening-behaviour signals into HistoryProvider so that
+    // Quick Picks are built from real play counts + listen time + completions.
+    playerProvider.onTrackStartedWithFile =
+        (track) => historyProvider.recordTrackStarted(track);
+    playerProvider.onPlaybackPaused = () => historyProvider.recordPaused();
+    playerProvider.onPlaybackResumed = () => historyProvider.recordResumed();
+    playerProvider.onHeartbeat = () => historyProvider.heartbeat();
     playerProvider.onTrackCompleted =
         (track) => historyProvider.recordCompletion(track);
 

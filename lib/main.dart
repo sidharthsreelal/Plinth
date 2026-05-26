@@ -67,6 +67,7 @@ class PlinthApp extends StatelessWidget {
     final pinsProvider = PinsProvider()..init();
     final libraryProvider = LibraryProvider();
     final playerProvider = PlayerProvider();
+    final favouritesProvider = FavouritesProvider()..init();
 
     // Wire all listening-behaviour signals into HistoryProvider so that
     // Quick Picks are built from real play counts + listen time + completions.
@@ -77,6 +78,19 @@ class PlinthApp extends StatelessWidget {
     playerProvider.onHeartbeat = () => historyProvider.heartbeat();
     playerProvider.onTrackCompleted =
         (track) => historyProvider.recordCompletion(track);
+
+    // Tell PlayerProvider how to check liked state so the widget heart icon
+    // updates automatically when the track changes.
+    playerProvider.isTrackLiked =
+        (track) => favouritesProvider.isFavourite(track);
+
+    // Wire widget like button: toggle favourite + push updated state to widget.
+    playerProvider.onWidgetLikeTapped = () {
+      final track = playerProvider.currentTrack;
+      if (track == null) return;
+      favouritesProvider.toggle(track);
+      playerProvider.setWidgetLikedState(favouritesProvider.isFavourite(track));
+    };
 
     // Hydrate pins as soon as the library finishes loading from cache.
     // This ensures pinned folders are navigable on first startup without
@@ -104,7 +118,7 @@ class PlinthApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ThemeProvider()..init()),
         ChangeNotifierProvider(create: (_) => libraryProvider),
         ChangeNotifierProvider(create: (_) => playerProvider),
-        ChangeNotifierProvider(create: (_) => FavouritesProvider()..init()),
+        ChangeNotifierProvider(create: (_) => favouritesProvider),
         ChangeNotifierProvider(create: (_) => historyProvider),
         ChangeNotifierProvider(create: (_) => pinsProvider),
       ],

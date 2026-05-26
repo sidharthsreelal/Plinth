@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
@@ -29,6 +30,27 @@ class PlayerProvider extends ChangeNotifier {
   /// waiting ahead of the current index. This is purely a counter so the
   /// queue badge dot can still appear. The actual tracks live in _queue.
   int _playNextCount = 0;
+
+  // ── Widget MethodChannels ────────────────────────────────────────────
+  /// Dart → Kotlin: push current track/play state into the home screen widget.
+  static const _widgetChannel =
+      MethodChannel('com.example.plinth/widget');
+
+  /// Kotlin → Dart: widget button taps (prev / playPause / next / like).
+  static const _controlChannel =
+      MethodChannel('com.example.plinth/widget_controls');
+
+  /// Whether the current track is liked — kept in sync so the widget heart
+  /// icon reflects the real liked state.
+  bool _widgetLiked = false;
+
+  /// Called when the widget like button is tapped. Wire in main.dart to
+  /// toggle FavouritesProvider and call setWidgetLikedState().
+  VoidCallback? onWidgetLikeTapped;
+
+  /// Called so external code (main.dart) can push the liked state for the
+  /// current track into the widget channel.
+  bool Function(AudioFile)? isTrackLiked;
 
   // ── Sleep timer ──────────────────────────────────────────────────────
   Timer? _sleepTimer;
@@ -84,6 +106,7 @@ class PlayerProvider extends ChangeNotifier {
   // ── Constructor ───────────────────────────────────────────────────────
   PlayerProvider() {
     _init();
+    _initWidgetControlChannel();
   }
 
   Future<void> _init() async {
@@ -164,6 +187,70 @@ class PlayerProvider extends ChangeNotifier {
     onTrackStarted?.call(track);
     onTrackStartedWithFile?.call(track);
     _startHeartbeat();
+    // Update liked state for new track before pushing to widget
+    _widgetLiked = isTrackLiked?.call(track) ?? false;
+    _updateWidget();
+  }
+
+  // ── Widget Channel ────────────────────────────────────────────────────
+
+  /// Registers the handler for button events coming from the Android widget.
+  void _initWidgetControlChannel() {
+    _controlChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'prev':
+          await skipPrevious();
+          break;
+        case 'playPause':
+          await togglePlayPause();
+          break;
+        case 'next':
+          await skipNext();
+          break;
+        case 'like':
+          onWidgetLikeTapped?.call();
+          break;
+      }
+    });
+  }
+
+  /// Update the liked state that is shown on the widget heart icon.
+  void setWidgetLikedState(bool liked) {
+    _widgetLiked = liked;
+    _updateWidget();
+  }
+
+  /// Writes current track state to the Android widget via MethodChannel.
+  /// Uses _player.playing directly (not _isPlaying) so the icon is always
+  /// accurate even when called immediately after pause()/play() before the
+  /// playerStateStream fires.
+  Future<void> _updateWidget() async {
+    if (kIsWeb) return;
+    final track = currentTrack;
+    if (track == null) return;
+    try {
+      String? artPath;
+      if (track.albumArt != null) {
+        final tempDir = await getTemporaryDirectory();
+        final artFile = File(
+            p.join(tempDir.path, 'widget_art_${track.path.hashCode}.jpg'));
+        if (!await artFile.exists()) {
+          await artFile.writeAsBytes(track.albumArt!);
+        }
+        artPath = artFile.path;
+      }
+      await _widgetChannel.invokeMethod('updateWidget', {
+        'title': track.title.isNotEmpty ? track.title : track.fileName,
+        'artist': track.artist.isNotEmpty ? track.artist : 'Unknown Artist',
+        // Use the authoritative value from the player — not the async-updated _isPlaying
+        'isPlaying': _player.playing,
+        'isLiked': _widgetLiked,
+        'artPath': artPath,
+      });
+    } catch (e) {
+      // Widget may not be placed on the home screen — silently ignore.
+      debugPrint('PlayerProvider: widget update skipped: $e');
+    }
   }
 
   // ── Artwork Caching ───────────────────────────────────────────────────
@@ -349,6 +436,8 @@ class PlayerProvider extends ChangeNotifier {
         await _player.play();
       }
     }
+    // Push updated play state to widget immediately after toggle.
+    _updateWidget();
   }
 
   Future<void> skipNext() async {
@@ -357,6 +446,7 @@ class PlayerProvider extends ChangeNotifier {
     } else if (_loopMode == LoopMode.all && _queue.isNotEmpty) {
       await _player.seek(Duration.zero, index: 0);
     }
+    _updateWidget();
   }
 
   Future<void> skipPrevious() async {
@@ -365,6 +455,7 @@ class PlayerProvider extends ChangeNotifier {
     } else if (_player.hasPrevious) {
       await _player.seekToPrevious();
     }
+    _updateWidget();
   }
 
   Future<void> skipToTrack(AudioFile track, {bool insertAsNext = false}) async {

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
@@ -26,24 +25,74 @@ class MetadataService {
     Duration duration = Duration.zero;
     Uint8List? albumArt;
     int? trackNumber;
+    String? lyrics;
 
     try {
-      final metadata = readMetadata(file, getImage: true);
+      // Use readAllMetadata() instead of readMetadata() so we get the concrete
+      // format-specific ParserTag type. This is critical for lyrics:
+      // readMetadata() checks ApeParser first — MP3 files with an APEv2 header
+      // get parsed as APE and their ID3v2 USLT lyrics frame is never read.
+      // readAllMetadata() lets us extract lyrics from the correct tag type.
+      final rawTag = readAllMetadata(file, getImage: true);
 
-      title = metadata.title ?? title;
-      artist = metadata.artist ?? artist;
-      album = metadata.album ?? album;
+      switch (rawTag) {
+        case Mp3Metadata m:
+          title = m.songName ?? title;
+          artist = m.bandOrOrchestra ?? m.leadPerformer ?? m.originalArtist ?? artist;
+          album = m.album ?? album;
+          duration = m.duration ?? duration;
+          trackNumber = m.trackNumber;
+          if (m.pictures.isNotEmpty) albumArt = m.pictures.first.bytes;
+          final mp3Lyrics = m.lyric;
+          if (mp3Lyrics != null && mp3Lyrics.trim().isNotEmpty) {
+            lyrics = mp3Lyrics.trim();
+          }
 
-      if (metadata.pictures != null && metadata.pictures!.isNotEmpty) {
-        albumArt = metadata.pictures!.first.bytes;
+        case VorbisMetadata m:
+          title = m.title.firstOrNull ?? title;
+          artist = m.artist.firstOrNull ?? artist;
+          album = m.album.firstOrNull ?? album;
+          duration = m.duration ?? duration;
+          trackNumber = m.trackNumber.firstOrNull;
+          if (m.pictures.isNotEmpty) albumArt = m.pictures.first.bytes;
+          final vorbisLyrics = m.lyric;
+          if (vorbisLyrics != null && vorbisLyrics.trim().isNotEmpty) {
+            lyrics = vorbisLyrics.trim();
+          }
+
+        case Mp4Metadata m:
+          title = m.title ?? title;
+          artist = m.artist ?? artist;
+          album = m.album ?? album;
+          duration = m.duration ?? duration;
+          trackNumber = m.trackNumber;
+          if (m.picture != null) albumArt = m.picture!.bytes;
+          final mp4Lyrics = m.lyrics;
+          if (mp4Lyrics != null && mp4Lyrics.trim().isNotEmpty) {
+            lyrics = mp4Lyrics.trim();
+          }
+
+        case ApeMetadata m:
+          title = m.title ?? title;
+          artist = m.artist ?? artist;
+          album = m.album ?? album;
+          duration = m.duration ?? duration;
+          trackNumber = m.trackNumber;
+          if (m.pictures.isNotEmpty) albumArt = m.pictures.first.bytes;
+          final apeLyrics = m.lyric;
+          if (apeLyrics != null && apeLyrics.trim().isNotEmpty) {
+            lyrics = apeLyrics.trim();
+          }
+
+        case RiffMetadata m:
+          title = m.title ?? title;
+          artist = m.artist ?? artist;
+          album = m.album ?? album;
+          duration = m.duration ?? duration;
+          trackNumber = m.trackNumber;
+          if (m.pictures.isNotEmpty) albumArt = m.pictures.first.bytes;
+          // RIFF (.wav) does not support embedded lyrics
       }
-
-      if (metadata.duration != null) {
-        duration = metadata.duration!;
-      }
-
-      // Extract track number — audio_metadata_reader exposes it as trackNumber
-      trackNumber = metadata.trackNumber;
     } catch (e) {
       debugPrint('MetadataService: metadata extraction failed for ${path.basename(file.path)}: $e');
     }
@@ -65,6 +114,7 @@ class MetadataService {
       albumArt: albumArt,
       audioBytes: audioBytes,
       trackNumber: trackNumber,
+      lyrics: lyrics,
     );
   }
 

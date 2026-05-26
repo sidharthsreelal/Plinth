@@ -7,6 +7,7 @@ import 'package:plinth/models/audio_file.dart';
 import 'package:plinth/providers/favourites_provider.dart';
 import 'package:plinth/providers/player_provider.dart';
 import 'package:plinth/providers/theme_provider.dart';
+import 'package:plinth/widgets/lyrics_view.dart';
 import 'package:plinth/widgets/vinyl_record.dart';
 
 class NowPlayingScreen extends StatefulWidget {
@@ -24,6 +25,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   // during drag, without waiting for the position stream to respond.
   bool _sliderDragging = false;
   double _sliderValue = 0;
+
+  // Lyrics toggle — persists across track changes intentionally.
+  // The state lives here (not inside Consumer) so switching tracks
+  // does NOT dismiss the lyrics view.
+  bool _showLyrics = false;
 
   @override
   Widget build(BuildContext context) {
@@ -87,16 +93,49 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                       size: 32),
                                   onPressed: () => Navigator.pop(context),
                                 ),
-                                // Placeholder keep row height consistent
-                                const SizedBox(width: 48),
+                                // Lyrics toggle button (top-right)
+                                AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 200),
+                                  child: IconButton(
+                                    key: ValueKey(_showLyrics),
+                                    tooltip: _showLyrics
+                                        ? 'Show record'
+                                        : 'Show lyrics',
+                                    icon: Icon(
+                                      Icons.lyrics_rounded,
+                                      size: 24,
+                                      color: _showLyrics
+                                          ? accent
+                                          : const Color(0xFF48484A),
+                                    ),
+                                    onPressed: () => setState(
+                                        () => _showLyrics = !_showLyrics),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
                           const Spacer(),
-                          VinylRecord(
-                            albumArt: track.albumArt,
-                            isSpinning: player.isPlaying,
-                            size: 280,
+                          // Vinyl record or lyrics view — toggled by top-right button.
+                          // AnimatedSwitcher cross-fades between the two.
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 350),
+                            switchInCurve: Curves.easeOut,
+                            switchOutCurve: Curves.easeIn,
+                            child: _showLyrics
+                                ? LyricsView(
+                                    key: const ValueKey('lyrics'),
+                                    lyrics: track.lyrics,
+                                    accent: accent,
+                                    position: position,
+                                    size: 280,
+                                  )
+                                : VinylRecord(
+                                    key: const ValueKey('vinyl'),
+                                    albumArt: track.albumArt,
+                                    isSpinning: player.isPlaying,
+                                    size: 280,
+                                  ),
                           ),
                           const SizedBox(height: 32),
                           Padding(

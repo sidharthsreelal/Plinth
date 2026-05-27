@@ -24,7 +24,9 @@ Future<void> main() async {
     androidNotificationChannelName: 'Plinth – Now Playing',
     androidNotificationIcon: 'mipmap/ic_launcher',
     androidNotificationOngoing: true,
-    androidStopForegroundOnPause: true,
+    // Keep the foreground service alive when paused so notification and lock
+    // screen controls remain responsive even after long background periods.
+    androidStopForegroundOnPause: false,
     preloadArtwork: true,
   );
 
@@ -79,18 +81,8 @@ class PlinthApp extends StatelessWidget {
     playerProvider.onTrackCompleted =
         (track) => historyProvider.recordCompletion(track);
 
-    // Tell PlayerProvider how to check liked state so the widget heart icon
-    // updates automatically when the track changes.
-    playerProvider.isTrackLiked =
-        (track) => favouritesProvider.isFavourite(track);
 
-    // Wire widget like button: toggle favourite + push updated state to widget.
-    playerProvider.onWidgetLikeTapped = () {
-      final track = playerProvider.currentTrack;
-      if (track == null) return;
-      favouritesProvider.toggle(track);
-      playerProvider.setWidgetLikedState(favouritesProvider.isFavourite(track));
-    };
+
 
     // Hydrate pins as soon as the library finishes loading from cache.
     // This ensures pinned folders are navigable on first startup without

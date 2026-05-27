@@ -30,13 +30,12 @@
         android:requestLegacyExternalStorage="true">
 
         <!--
-            Switched from .MainActivity to AudioServiceActivity so that
-            just_audio_background can wire up the media session properly.
-            Your existing FlutterActivity code is unaffected — AudioServiceActivity
-            extends FlutterFragmentActivity which extends FlutterActivity.
+            MainActivity extends AudioServiceActivity so it gets both the
+            media session wiring from just_audio_background AND the
+            MethodChannel for pushing widget state.
         -->
         <activity
-            android:name="com.ryanheise.audioservice.AudioServiceActivity"
+            android:name=".MainActivity"
             android:label="Plinth"
             android:exported="true"
             android:launchMode="singleTop"
@@ -75,10 +74,28 @@
             </intent-filter>
         </receiver>
 
+        <!-- Plinth home screen widget (4×1) -->
+        <receiver
+            android:name=".PlinthWidgetProvider"
+            android:exported="true"
+            android:label="Plinth">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.plinth.widget.PREV" />
+                <action android:name="com.example.plinth.widget.PLAY_PAUSE" />
+                <action android:name="com.example.plinth.widget.NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/plinth_widget_info" />
+        </receiver>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
+
     </application>
+
 
     <queries>
         <intent>

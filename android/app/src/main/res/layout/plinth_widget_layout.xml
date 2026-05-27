@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Plinth 4×1 home screen widget.
+    RULES:
+    • Only LinearLayout, TextView, ImageView (all guaranteed RemoteViews-safe)
+    • Zero drawable references (all set via setImageViewBitmap in code)
+    • Zero fontFamily attributes (launcher process may not resolve them)
+    • Zero custom backgrounds on child views
+    • Root background is inline hex only
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="#DD1A1A1C">
+
+    <!-- Left: album art, 1:1 aspect ratio -->
+    <ImageView
+        android:id="@+id/widget_album_art"
+        android:layout_width="72dp"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="Album art" />
+
+    <!-- Right column: text + controls -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="8dp">
+
+        <!-- "Song - Artist" -->
+        <TextView
+            android:id="@+id/widget_track_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Not Playing"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:paddingBottom="6dp" />
+
+        <!-- Controls row: prev, play/pause, next -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/widget_btn_prev"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:scaleType="centerInside"
+                android:contentDescription="Previous track" />
+
+            <ImageView
+                android:id="@+id/widget_btn_play_pause"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:scaleType="centerInside"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:contentDescription="Play or Pause" />
+
+            <ImageView
+                android:id="@+id/widget_btn_next"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:scaleType="centerInside"
+                android:contentDescription="Next track" />
+
+        </LinearLayout>
+    </LinearLayout>
+
+</LinearLayout>
+
